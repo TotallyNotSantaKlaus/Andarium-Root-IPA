@@ -80,12 +80,14 @@ def main() -> int:
     icon_url = f"https://raw.githubusercontent.com/{args.repo}/main/docs/icon.png"
 
     ult_notes = (
-        "Rooted Andarium v3 Ultimate Edition (Android 17 / LineageOS 24 on Linux 6.18.60): "
-        "Magisk v31.1, ReZygisk, Vector (LSPosed), Control Panel v3 (WebUI + localhost:8787 with HTTP Proxy, "
-        "DPI/Resolution, SSH Key Manager & live Module toggles), Stealth Mode (PlayIntegrityFork + TrickyStore + "
-        "Zygisk-Assistant), Frida Server, strace/socat/sqlite3/jq/tcpdump, Android 17 Conscrypt CA cert injection, "
-        "TrustMeAlready, Systemless Ad-Block, Dropbear SSH, Termux, Material Files, microG, Aurora Store, Obtainium, "
-        "App Manager, Shizuku (auto-started), and Neo Backup."
+        "Andarium Root v4 — Pre-Boot & Config Studio Edition (Android 17 / LineageOS 24 on Linux 6.18.60): "
+        "Native iOS Pre-Boot Setup Studio (# Root Setup before Start Emulation), 6 Role Presets "
+        "(Mix/Ultimate, Security Engineer, Hacker/RE, Gamer, Privacy/Daily, Clean/Unrooted), "
+        "Magisk v31.1 with Root Hide/Restore toggle, ReZygisk, Vector (LSPosed), Control Panel v4 "
+        "(Live Mode Switcher, Per-App SU & DenyList Manager, Bundled Offline App Storefront, Tweaks & JSON Backup), "
+        "Stealth Stack (PlayIntegrityFork + TrickyStore + Zygisk-Assistant), Frida Server + 5 bypass scripts + "
+        "strace/socat/sqlite3/jq/tcpdump, Android 17 Conscrypt CA cert injection, Dropbear SSH, Systemless Ad-Block, "
+        "and 13 selectable apps (incl. Disable FLAG_SECURE & GPS Setter)."
     )
     if args.sha256:
         ult_notes += f"\n\nSHA-256: {args.sha256}"
@@ -110,8 +112,9 @@ def main() -> int:
     if args.lite_url and args.lite_size > 0:
         lite_bid = f"{args.bundle_id}.lite"
         lite_notes = (
-            "Compact Andarium Root Lite (Android 17 / LineageOS 24): Magisk v31.1, ReZygisk, Vector (LSPosed), "
-            "Control Panel v3, native adb root, switchable SELinux, Termux, Material Files, and microG."
+            "Compact Andarium Root v4 Lite (Android 17 / LineageOS 24): Native iOS Pre-Boot Setup Studio, "
+            "Magisk v31.1, ReZygisk, Vector (LSPosed), Control Panel v4, native adb root, switchable SELinux, "
+            "Termux, Material Files, and microG."
         )
         if args.lite_sha256:
             lite_notes += f"\n\nSHA-256: {args.lite_sha256}"
@@ -134,7 +137,7 @@ def main() -> int:
 
     source = {
         "name": f"{args.display_name} Repository",
-        "subtitle": "Rooted Android 17 VM for iOS (Magisk + ReZygisk + Vector + Control Panel v3)",
+        "subtitle": "Rooted Android 17 VM for iOS (Pre-Boot Studio + Magisk + Vector + Control Panel v4)",
         "description": "Automated rooted builds of Andarium with Magisk v31.1, ReZygisk, Vector, and power-user tools.",
         "identifier": f"{args.bundle_id}.source",
         "iconURL": icon_url,

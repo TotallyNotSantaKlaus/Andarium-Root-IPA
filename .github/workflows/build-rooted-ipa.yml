@@ -17,8 +17,29 @@ on:
         description: "Optional imxieyi/Kernarium release tag (leave empty for latest)"
         required: false
         default: ""
+      preset:
+        description: "Default role preset baked into primary IPA (still switchable in iOS Pre-Boot Studio)"
+        type: choice
+        options:
+          - mix
+          - seceng
+          - hacker
+          - gamer
+          - privacy
+          - unrooted
+        default: mix
+      icon_theme:
+        description: "Custom iOS app icon theme"
+        type: choice
+        options:
+          - duskjade
+          - crimson
+          - cyber
+          - stealth
+          - stock
+        default: duskjade
       selinux:
-        description: "Default boot SELinux mode (Ultimate flavor)"
+        description: "Default boot SELinux mode override"
         type: choice
         options:
           - permissive
@@ -52,17 +73,54 @@ jobs:
           sudo apt-get install -y erofs-utils openssl
       - name: Run Python compile checks & test_builder.py
         run: |
-          python3 -m py_compile scripts/build_rooted_ipa.py scripts/verify_rooted_ipa.py scripts/live_audit.py scripts/generate_altstore_source.py scripts/test_builder.py
+          python3 -m py_compile scripts/build_rooted_ipa.py scripts/verify_rooted_ipa.py scripts/live_audit.py scripts/generate_altstore_source.py scripts/macho_inject.py scripts/studio_web.py scripts/test_builder.py
           python3 scripts/test_builder.py
 
+  build-ios-preboot-dylib:
+    name: Compile Native iOS Pre-Boot Studio Dylib (arm64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile AndariumRootPreboot.dylib with Xcode iPhoneOS SDK
+        run: |
+          mkdir -p build-ios
+          xcrun -sdk iphoneos clang \
+            -arch arm64 \
+            -miphoneos-version-min=17.0 \
+            -fobjc-arc \
+            -dynamiclib \
+            -O2 \
+            -Wall -Wextra -Wno-unused-parameter \
+            -install_name "@executable_path/Frameworks/AndariumRootPreboot.dylib" \
+            -framework Foundation \
+            -framework UIKit \
+            -framework WebKit \
+            ios/AndariumRootPreboot/fishhook.c \
+            ios/AndariumRootPreboot/AndariumRootPreboot.m \
+            -o build-ios/AndariumRootPreboot.dylib
+          file build-ios/AndariumRootPreboot.dylib
+          otool -L build-ios/AndariumRootPreboot.dylib
+      - name: Upload compiled AndariumRootPreboot.dylib
+        uses: actions/upload-artifact@v4
+        with:
+          name: AndariumRootPreboot-dylib
+          path: build-ios/AndariumRootPreboot.dylib
+          retention-days: 7
+
   build-and-release:
-    name: Build & Publish Ultimate + Lite IPAs
-    needs: test
+    name: Build & Publish Ultimate + Lite IPAs (with Native iOS Pre-Boot Studio)
+    needs: [test, build-ios-preboot-dylib]
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Download compiled native iOS Pre-Boot dylib
+        uses: actions/download-artifact@v4
+        with:
+          name: AndariumRootPreboot-dylib
+          path: assets/ios
 
       - name: Install Linux build dependencies (erofs-utils with zstd, openssl)
         run: |
@@ -97,7 +155,7 @@ jobs:
               if req_tag
               else "https://api.github.com/repos/imxieyi/Kernarium/releases/latest"
           )
-          headers = {"User-Agent": "Andarium-Root-CI/3.0"}
+          headers = {"User-Agent": "Andarium-Root-CI/4.0"}
           if tok := os.environ.get("GH_TOKEN"):
               headers["Authorization"] = f"Bearer {tok}"
 
@@ -134,7 +192,7 @@ jobs:
           mkdir -p .cache
           curl -fL --retry 3 -o ".cache/${{ steps.upstream.outputs.ipa_name }}" "${{ steps.upstream.outputs.ipa_url }}"
 
-      - name: Build and verify Ultimate + Lite IPAs
+      - name: Build and verify Ultimate + Lite IPAs (with Native iOS Pre-Boot Studio)
         if: steps.upstream.outputs.skip != 'true'
         id: build
         run: |
@@ -145,9 +203,13 @@ jobs:
           LITE_PATH="dist/${LITE_NAME}"
           BID="${{ github.event.inputs.bundle_id || 'com.andarium.root' }}"
           DNAME="${{ github.event.inputs.display_name || 'Andarium Root' }}"
+          PRESET="${{ github.event.inputs.preset || 'mix' }}"
+          ICON_THEME="${{ github.event.inputs.icon_theme || 'duskjade' }}"
 
           python3 scripts/build_rooted_ipa.py \
-            --profile ultimate \
+            --preset "${PRESET}" \
+            --icon-theme "${ICON_THEME}" \
+            --preboot-dylib "assets/ios/AndariumRootPreboot.dylib" \
             --base-ipa ".cache/${BASE_NAME}" \
             --output "${ULT_PATH}" \
             --bundle-id "${BID}" \
@@ -156,6 +218,8 @@ jobs:
 
           python3 scripts/build_rooted_ipa.py \
             --profile lite \
+            --icon-theme "${ICON_THEME}" \
+            --preboot-dylib "assets/ios/AndariumRootPreboot.dylib" \
             --base-ipa ".cache/${BASE_NAME}" \
             --output "${LITE_PATH}" \
             --bundle-id "${BID}.lite" \
@@ -183,12 +247,13 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.upstream.outputs.root_tag }}
-          name: "Andarium Root (${{ steps.upstream.outputs.tag }})"
+          name: "Andarium Root v4 (${{ steps.upstream.outputs.tag }})"
           body: |
-            Automated rooted builds based on upstream `imxieyi/Kernarium` release `${{ steps.upstream.outputs.tag }}`.
+            Automated rooted v4 builds based on upstream `imxieyi/Kernarium` release `${{ steps.upstream.outputs.tag }}`.
+            Includes the **Native iOS Pre-Boot Setup Studio (`# Root Setup`)** compiled with Apple's iPhoneOS SDK and injected cleanly into `Andarium.app`, plus Control Panel v4, 6 role presets, 13 bundled APKs, and Frida script pack.
             Both flavors passed full independent multi-layer verification (`verify_rooted_ipa.py`).
 
-            - **Ultimate** (`${{ steps.build.outputs.ult_name }}`): `${{ steps.build.outputs.ult_size }}` bytes — SHA-256 `${{ steps.build.outputs.ult_sha }}`
+            - **Ultimate / Mix** (`${{ steps.build.outputs.ult_name }}`): `${{ steps.build.outputs.ult_size }}` bytes — SHA-256 `${{ steps.build.outputs.ult_sha }}`
             - **Lite** (`${{ steps.build.outputs.lite_name }}`): `${{ steps.build.outputs.lite_size }}` bytes — SHA-256 `${{ steps.build.outputs.lite_sha }}`
           files: |
             ${{ steps.build.outputs.ult_path }}

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Build a rooted Andarium IPA (v2 Ultimate Edition).
+"""Build a customizable Andarium Root IPA (v4 Pre-Boot & Config Studio Edition).
 
-Bundles Magisk v31.1, ReZygisk, Vector (LSPosed), Andarium Root Control Panel
-(WebUI + localhost:8787), Stealth Stack (PlayIntegrityFork + TrickyStore +
-Zygisk-Assistant), Pentest Lab (Frida Server + Android 17 Conscrypt CA Cert
-Injection + TrustMeAlready), Networking Pack (Systemless StevenBlack Hosts +
-Dropbear SSH), Power-User Apps (Termux, Material Files, microG, Aurora Store,
-Obtainium, App Manager, Shizuku, Neo Backup), custom/ drop-in overlay, and a
-custom iOS app icon.
+Supports 6 role presets (Mix/Ultimate, Security Engineer, Hacker/RE, Gamer,
+Privacy/Daily, Clean/Unrooted), declarative `andarium-config.json`, build-time
+unrooted mode (`--no-root`), runtime/pre-boot root hide/restore toggle, 4 custom
+iOS icon themes (`duskjade`, `crimson`, `cyber`, `stealth`), native iOS Pre-Boot
+Setup Studio (`AndariumRootPreboot.dylib` + Mach-O `LC_LOAD_DYLIB` injection),
+Control Panel v4, Frida ready-to-run bypass script pack, 13 bundled APKs, and
+custom/ drop-in overlay.
 
 Must be run inside Linux / WSL2 with erofs-utils (`mkfs.erofs`, `fsck.erofs`,
 `dump.erofs`) and `openssl` installed.
@@ -40,7 +40,10 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = Path(__file__).resolve().parent
 MANIFESTS_DIR = ROOT_DIR / "manifests"
 GUEST_SCRIPTS_DIR = SCRIPTS_DIR / "guest"
+FRIDA_SCRIPTS_SRC = GUEST_SCRIPTS_DIR / "frida_scripts"
 CONTROL_MODULE_SRC = GUEST_SCRIPTS_DIR / "control_module"
+IOS_PREBOOT_SRC = ROOT_DIR / "ios" / "AndariumRootPreboot"
+DEFAULT_PREBOOT_DYLIB = ROOT_DIR / "assets" / "ios" / "AndariumRootPreboot.dylib"
 ICON_ASSETS_DIR = ROOT_DIR / "assets" / "icon"
 DEFAULT_CUSTOM_DIR = ROOT_DIR / "custom"
 CACHE_DIR = ROOT_DIR / ".cache"
@@ -48,14 +51,23 @@ DEFAULT_OUTPUT = ROOT_DIR / "dist" / "Andarium-Root-1.0-15.ipa"
 
 sys.path.insert(0, str(SCRIPTS_DIR))
 import android_image  # noqa: E402
+import macho_inject  # noqa: E402
 
 IPA_APP_PREFIX = "Payload/Andarium.app/"
+IPA_MAIN_MACHO = IPA_APP_PREFIX + "Andarium"
 IPA_SYSTEM_PREFIX = IPA_APP_PREFIX + "andarium-system/"
 IPA_SYSTEM_IMG = IPA_SYSTEM_PREFIX + "guest/system.img"
 IPA_LAYOUT_JSON = IPA_SYSTEM_PREFIX + "guest/partition-layout.json"
 IPA_MANIFEST_JSON = IPA_SYSTEM_PREFIX + "release-manifest.json"
+IPA_CMDLINE_TXT = IPA_SYSTEM_PREFIX + "boot/kernel-command-line.txt"
 IPA_INFO_PLIST = IPA_APP_PREFIX + "Info.plist"
 IPA_CODESIG_PREFIX = IPA_APP_PREFIX + "_CodeSignature/"
+IPA_PREBOOT_BUNDLE = IPA_APP_PREFIX + "AndariumRootPreboot.bundle/"
+IPA_PREBOOT_DYLIB = IPA_APP_PREFIX + "Frameworks/AndariumRootPreboot.dylib"
+PREBOOT_DYLIB_LOAD_PATH = "@executable_path/Frameworks/AndariumRootPreboot.dylib"
+
+ICON_THEMES = ("duskjade", "crimson", "cyber", "stealth", "stock")
+PRESET_NAMES = ("mix", "seceng", "hacker", "gamer", "privacy", "unrooted")
 
 CUSTOM_ICON_FILES = (
     "AndariumRoot60x60@2x.png",
@@ -652,6 +664,15 @@ def stage_tools(
             raise BuildError("Decompressed frida-server is not an AArch64 ELF binary")
         frida_dst.write_bytes(raw)
         log(f"  staged tool: frida-server ({len(raw):,} B AArch64 ELF)")
+        if FRIDA_SCRIPTS_SRC.is_dir():
+            fs_dst = tools_root / "frida-scripts"
+            fs_dst.mkdir(parents=True, exist_ok=True)
+            staged_js: list[str] = []
+            for js_file in sorted(FRIDA_SCRIPTS_SRC.glob("*.js")):
+                (fs_dst / js_file.name).write_bytes(read_text_lf(js_file))
+                staged_js.append(js_file.name)
+            if staged_js:
+                log(f"  staged Frida bypass script pack ({len(staged_js)}): {', '.join(staged_js)}")
 
     if dropbear_zip is not None:
         db_dir = tools_root / "dropbear"
@@ -822,7 +843,7 @@ def apply_odm_tree_attrs(tree_root: Path) -> None:
             rel = fpath.relative_to(tree_root).as_posix()
             is_exec = (
                 rel.startswith("scripts/")
-                or rel.startswith("tools/")
+                or (rel.startswith("tools/") and not fn.endswith(".js"))
                 or (rel.startswith("magisk-bin/") and not fn.endswith(".jar"))
                 or rel.endswith(".sh")
                 or "/bin/" in ("/" + rel)
@@ -842,7 +863,7 @@ def build_odm_image(
     out_odm: Path,
     work_dir: Path,
     *,
-    magisk_apk: Path,
+    magisk_apk: Path | None,
     rezygisk_zip: Path | None,
     vector_zip: Path | None,
     pif_zip: Path | None,
@@ -857,6 +878,8 @@ def build_odm_image(
     selinux_mode: str,
     enable_debuggable: bool,
     default_stealth: str,
+    build_unrooted: bool = False,
+    effective_config: dict[str, object] | None = None,
 ) -> None:
     odm_tree = work_dir / "odm_tree"
     if odm_tree.exists():
@@ -870,107 +893,124 @@ def build_odm_image(
         raise BuildError(f"Unexpected stock odm root selinux label: {root_label!r}")
 
     payload_root = odm_tree / "andarium-root"
-    magisk_bin_dir = payload_root / "magisk-bin"
     config_dir = payload_root / "config"
-    modules_dir = payload_root / "modules"
-    tools_dir = payload_root / "tools"
     apks_dir = payload_root / "apks"
-    scripts_dir = payload_root / "scripts"
     custom_payload_dir = payload_root / "custom"
-    for d in (magisk_bin_dir, config_dir, modules_dir, tools_dir, apks_dir, scripts_dir):
+    for d in (config_dir, apks_dir):
         d.mkdir(parents=True, exist_ok=True)
 
-    # 1. Magisk runtime support binaries & assets for /data/adb/magisk/
-    with zipfile.ZipFile(magisk_apk, "r") as zf:
-        bin_map = {
-            "lib/arm64-v8a/libbusybox.so": "busybox",
-            "lib/arm64-v8a/libmagiskboot.so": "magiskboot",
-            "lib/arm64-v8a/libmagiskinit.so": "magiskinit",
-            "lib/arm64-v8a/libmagiskpolicy.so": "magiskpolicy",
-            "lib/arm64-v8a/libbootctl.so": "bootctl",
-            "lib/arm64-v8a/libmagisk.so": "magisk",
-            "lib/arm64-v8a/libinit-ld.so": "init-ld",
-            "lib/armeabi-v7a/libmagisk.so": "magisk32",
-        }
-        for src_name, dst_name in bin_map.items():
-            (magisk_bin_dir / dst_name).write_bytes(zf.read(src_name))
-        for asset in (
-            "addon.d.sh",
-            "app_functions.sh",
-            "boot_patch.sh",
-            "main.jar",
-            "module_installer.sh",
-            "uninstaller.sh",
-            "util_functions.sh",
-        ):
-            (magisk_bin_dir / asset).write_bytes(zf.read(f"assets/{asset}"))
-    log("  staged /odm/andarium-root/magisk-bin (Magisk v31.1 full environment)")
-
-    # 2. Seeded magisk.db
-    create_magisk_db(config_dir / "magisk.db", enable_rezygisk=(rezygisk_zip is not None))
-    log(f"  staged /odm/andarium-root/config/magisk.db (zygisk={0 if rezygisk_zip else 1}, uid 2000 granted)")
-
-    # 3. Stage tools (Frida Server, Dropbear SSH, CLI pentest suite, StevenBlack hosts) & custom/ drop-ins
-    hosts_adblock_dst = stage_tools(
-        tools_dir,
-        config_dir,
-        frida_xz=frida_xz,
-        dropbear_zip=dropbear_zip,
-        hosts_txt=hosts_txt,
-        cli_tools=cli_tools,
-    )
-    custom_hosts_dst = stage_custom_dropins(custom_dir, custom_payload_dir)
-
-    # 4. Pre-bundled Magisk modules
-    stage_control_module(
-        modules_dir,
-        enable_debuggable=enable_debuggable,
-        default_stealth=default_stealth,
-        hosts_adblock_path=hosts_adblock_dst,
-        custom_hosts_path=custom_hosts_dst,
-    )
-    if rezygisk_zip is not None:
-        stage_rezygisk_module(rezygisk_zip, modules_dir)
-    if vector_zip is not None:
-        stage_vector_module(vector_zip, modules_dir)
-    if pif_zip is not None:
-        stage_playintegrityfork_module(pif_zip, modules_dir)
-    if trickystore_zip is not None:
-        stage_trickystore_module(trickystore_zip, modules_dir, config_dir)
-    if zygisk_assistant_zip is not None:
-        stage_zygisk_assistant_module(zygisk_assistant_zip, modules_dir)
-
-    # 5. Pre-bundled APKs for first-boot installation
-    shutil.copy2(magisk_apk, apks_dir / "01-magisk.apk")
-    log(f"  staged APK: 01-magisk.apk ({magisk_apk.stat().st_size:,} B)")
-    for install_name, apk_path in extra_apks:
-        shutil.copy2(apk_path, apks_dir / install_name)
-        log(f"  staged APK: {install_name} ({apk_path.stat().st_size:,} B)")
-
-    # 6. Guest scripts (LF-normalized + syntax-checked)
-    boot_sh = scripts_dir / "andarium_boot_complete.sh"
-    boot_sh.write_bytes(
-        read_guest_script_lf(
-            "andarium_boot_complete.sh",
-            {
-                "__DEFAULT_SELINUX__": selinux_mode,
-                "__DEFAULT_STEALTH__": default_stealth,
-            },
+    if effective_config is not None:
+        (config_dir / "preset.json").write_bytes(
+            (json.dumps(effective_config, indent=2, sort_keys=True) + "\n").encode("utf-8")
         )
-    )
-    check_shell_syntax(boot_sh)
 
-    ctl_sh = scripts_dir / "andarium-ctl"
-    ctl_sh.write_bytes(read_guest_script_lf("andarium-ctl"))
-    check_shell_syntax(ctl_sh)
+    if build_unrooted:
+        log("  build-time UNROOTED mode: omitting Magisk runtime, root modules & pentest daemons")
+        for install_name, apk_path in extra_apks:
+            shutil.copy2(apk_path, apks_dir / install_name)
+            log(f"  staged unrooted APK: {install_name} ({apk_path.stat().st_size:,} B)")
+        stage_custom_dropins(custom_dir, custom_payload_dir)
+    else:
+        if magisk_apk is None:
+            raise BuildError("magisk_apk is required for rooted builds")
+        magisk_bin_dir = payload_root / "magisk-bin"
+        modules_dir = payload_root / "modules"
+        tools_dir = payload_root / "tools"
+        scripts_dir = payload_root / "scripts"
+        for d in (magisk_bin_dir, modules_dir, tools_dir, scripts_dir):
+            d.mkdir(parents=True, exist_ok=True)
 
-    termux_setup = scripts_dir / "andarium-termux-setup"
-    termux_setup.write_bytes(read_guest_script_lf("andarium-termux-setup"))
-    check_shell_syntax(termux_setup)
+        # 1. Magisk runtime support binaries & assets for /data/adb/magisk/
+        with zipfile.ZipFile(magisk_apk, "r") as zf:
+            bin_map = {
+                "lib/arm64-v8a/libbusybox.so": "busybox",
+                "lib/arm64-v8a/libmagiskboot.so": "magiskboot",
+                "lib/arm64-v8a/libmagiskinit.so": "magiskinit",
+                "lib/arm64-v8a/libmagiskpolicy.so": "magiskpolicy",
+                "lib/arm64-v8a/libbootctl.so": "bootctl",
+                "lib/arm64-v8a/libmagisk.so": "magisk",
+                "lib/arm64-v8a/libinit-ld.so": "init-ld",
+                "lib/armeabi-v7a/libmagisk.so": "magisk32",
+            }
+            for src_name, dst_name in bin_map.items():
+                (magisk_bin_dir / dst_name).write_bytes(zf.read(src_name))
+            for asset in (
+                "addon.d.sh",
+                "app_functions.sh",
+                "boot_patch.sh",
+                "main.jar",
+                "module_installer.sh",
+                "uninstaller.sh",
+                "util_functions.sh",
+            ):
+                (magisk_bin_dir / asset).write_bytes(zf.read(f"assets/{asset}"))
+        log("  staged /odm/andarium-root/magisk-bin (Magisk v31.1 full environment)")
 
-    shell_rc = scripts_dir / "andarium-shell-rc.sh"
-    shell_rc.write_bytes(read_guest_script_lf("andarium-shell-rc.sh"))
-    check_shell_syntax(shell_rc)
+        # 2. Seeded magisk.db
+        create_magisk_db(config_dir / "magisk.db", enable_rezygisk=(rezygisk_zip is not None))
+        log(f"  staged /odm/andarium-root/config/magisk.db (zygisk={0 if rezygisk_zip else 1}, uid 2000 granted)")
+
+        # 3. Stage tools (Frida Server + script pack, Dropbear SSH, CLI pentest suite, StevenBlack hosts) & custom/ drop-ins
+        hosts_adblock_dst = stage_tools(
+            tools_dir,
+            config_dir,
+            frida_xz=frida_xz,
+            dropbear_zip=dropbear_zip,
+            hosts_txt=hosts_txt,
+            cli_tools=cli_tools,
+        )
+        custom_hosts_dst = stage_custom_dropins(custom_dir, custom_payload_dir)
+
+        # 4. Pre-bundled Magisk modules
+        stage_control_module(
+            modules_dir,
+            enable_debuggable=enable_debuggable,
+            default_stealth=default_stealth,
+            hosts_adblock_path=hosts_adblock_dst,
+            custom_hosts_path=custom_hosts_dst,
+        )
+        if rezygisk_zip is not None:
+            stage_rezygisk_module(rezygisk_zip, modules_dir)
+        if vector_zip is not None:
+            stage_vector_module(vector_zip, modules_dir)
+        if pif_zip is not None:
+            stage_playintegrityfork_module(pif_zip, modules_dir)
+        if trickystore_zip is not None:
+            stage_trickystore_module(trickystore_zip, modules_dir, config_dir)
+        if zygisk_assistant_zip is not None:
+            stage_zygisk_assistant_module(zygisk_assistant_zip, modules_dir)
+
+        # 5. Pre-bundled APKs for first-boot installation & offline storefront
+        shutil.copy2(magisk_apk, apks_dir / "01-magisk.apk")
+        log(f"  staged APK: 01-magisk.apk ({magisk_apk.stat().st_size:,} B)")
+        for install_name, apk_path in extra_apks:
+            shutil.copy2(apk_path, apks_dir / install_name)
+            log(f"  staged APK: {install_name} ({apk_path.stat().st_size:,} B)")
+
+        # 6. Guest scripts (LF-normalized + syntax-checked)
+        boot_sh = scripts_dir / "andarium_boot_complete.sh"
+        boot_sh.write_bytes(
+            read_guest_script_lf(
+                "andarium_boot_complete.sh",
+                {
+                    "__DEFAULT_SELINUX__": selinux_mode,
+                    "__DEFAULT_STEALTH__": default_stealth,
+                },
+            )
+        )
+        check_shell_syntax(boot_sh)
+
+        ctl_sh = scripts_dir / "andarium-ctl"
+        ctl_sh.write_bytes(read_guest_script_lf("andarium-ctl"))
+        check_shell_syntax(ctl_sh)
+
+        termux_setup = scripts_dir / "andarium-termux-setup"
+        termux_setup.write_bytes(read_guest_script_lf("andarium-termux-setup"))
+        check_shell_syntax(termux_setup)
+
+        shell_rc = scripts_dir / "andarium-shell-rc.sh"
+        shell_rc.write_bytes(read_guest_script_lf("andarium-shell-rc.sh"))
+        check_shell_syntax(shell_rc)
 
     # 7. Apply exact ownership, permissions, and security.selinux labels to /odm/andarium-root
     apply_odm_tree_attrs(payload_root)
@@ -1040,12 +1080,89 @@ def assemble_system_disk(part_dir: Path, out_dir: Path) -> tuple[Path, Path]:
     return disk_path, layout_path
 
 
+def load_presets_manifest() -> dict[str, object]:
+    return json.loads((MANIFESTS_DIR / "presets.json").read_text(encoding="utf-8"))
+
+
+def encode_preboot_cmdline(
+    stock_cmdline_bytes: bytes,
+    cfg: dict[str, object],
+    catalog: list[dict[str, object]],
+) -> bytes:
+    """Append compact sanitized `androidboot.ar.*` tokens onto stock kernel-command-line.txt."""
+    import re
+
+    stock_text = stock_cmdline_bytes.decode("utf-8")
+    words = [w for w in stock_text.split() if not w.startswith("androidboot.ar.")]
+
+    preset = str(cfg.get("preset", "mix"))
+    if not re.fullmatch(r"[a-z0-9_-]{1,20}", preset):
+        preset = "mix"
+    root_bit = "1" if cfg.get("root_enabled", True) else "0"
+    se_bit = "1" if str(cfg.get("selinux", "permissive")) == "enforcing" else "0"
+    stealth_bit = "1" if cfg.get("stealth", False) else "0"
+    adbroot_bit = "1" if cfg.get("adbroot", True) else "0"
+    dbg_bit = "1" if cfg.get("debuggable", True) else "0"
+
+    mods = cfg.get("modules") if isinstance(cfg.get("modules"), dict) else {}
+    svcs = cfg.get("services") if isinstance(cfg.get("services"), dict) else {}
+    twks = cfg.get("tweaks") if isinstance(cfg.get("tweaks"), dict) else {}
+
+    mods_bits = (
+        ("1" if mods.get("rezygisk", True) else "0")
+        + ("1" if mods.get("vector", True) else "0")
+        + ("1" if mods.get("stealth_stack", True) else "0")
+        + ("1" if svcs.get("adblock", True) else "0")
+    )
+    svcs_bits = (
+        ("1" if svcs.get("frida_autostart", False) else "0")
+        + ("1" if svcs.get("ssh_autostart", False) else "0")
+        + ("1" if svcs.get("shizuku_autostart", True) else "0")
+    )
+
+    enabled_apps = set(cfg.get("apps") or [item["id"] for item in catalog])
+    apps_bits = "".join("1" if item["id"] in enabled_apps else "0" for item in catalog)
+
+    anim = str(twks.get("anim_scale", "0.5"))
+    if anim not in ("0", "0.5", "1"):
+        anim = "0.5"
+    try:
+        swap_int = max(10, min(200, int(twks.get("swappiness", 100))))
+    except (TypeError, ValueError):
+        swap_int = 100
+    awake_bit = "1" if twks.get("stay_awake", False) else "0"
+    dpi_raw = str(twks.get("dpi", "default"))
+    dpi = dpi_raw if re.fullmatch(r"[0-9]{3}", dpi_raw) else "0"
+
+    cfg_token = (
+        f"4,1,{preset},{root_bit},{se_bit},{stealth_bit},{adbroot_bit},{dbg_bit},"
+        f"{mods_bits},{svcs_bits},{apps_bits},{anim},{swap_int},{awake_bit},{dpi}"
+    )
+    if len(cfg_token) >= 91:
+        raise BuildError(f"androidboot.ar.cfg exceeds Android PROP_VALUE_MAX: {cfg_token}")
+
+    words.append(f"androidboot.ar.preset={preset}")
+    words.append(f"androidboot.ar.cfg={cfg_token}")
+
+    proxy = str(cfg.get("proxy", "") or "").strip()
+    if proxy and re.fullmatch(r"[a-zA-Z0-9.:_-]{3,64}", proxy) and ":" in proxy:
+        words.append(f"androidboot.ar.proxy={proxy}")
+
+    final = (" ".join(words) + "\n").encode("utf-8")
+    if b'"' in final or b"'" in final:
+        raise BuildError("Generated kernel command line contains forbidden quote characters")
+    if len(final) > 2048:
+        raise BuildError(f"Generated kernel command line unexpectedly long ({len(final)} B)")
+    return final
+
+
 def update_release_manifest(
     stock_manifest: dict[str, object],
     system_img_size: int,
     layout_json_size: int,
     *,
     release_suffix: str,
+    cmdline_size: int | None = None,
 ) -> bytes:
     manifest = json.loads(json.dumps(stock_manifest))
     orig_id = str(manifest["release_id"])
@@ -1061,8 +1178,21 @@ def update_release_manifest(
             item["size"] = system_img_size
         elif item.get("path") == "guest/partition-layout.json":
             item["size"] = layout_json_size
+        elif cmdline_size is not None and item.get("path") == "boot/kernel-command-line.txt":
+            item["size"] = cmdline_size
 
     return (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def resolve_icon_dir(icon_theme: str) -> Path | None:
+    if icon_theme == "stock":
+        return None
+    themed = ICON_ASSETS_DIR / icon_theme
+    if themed.is_dir():
+        return themed
+    if icon_theme == "duskjade" and (ICON_ASSETS_DIR / CUSTOM_ICON_FILES[0]).is_file():
+        return ICON_ASSETS_DIR
+    raise BuildError(f"Unknown or missing icon theme directory: {themed}")
 
 
 def patch_info_plist(
@@ -1102,21 +1232,32 @@ def package_ipa(
     system_img: Path,
     layout_json_bytes: bytes,
     manifest_json_bytes: bytes,
+    cmdline_bytes: bytes | None,
     bundle_id: str,
     display_name: str,
-    use_custom_icon: bool,
+    icon_theme: str,
+    preboot_defaults_bytes: bytes | None = None,
+    preboot_dylib: Path | None = None,
 ) -> None:
     output_ipa.parent.mkdir(parents=True, exist_ok=True)
     tmp_ipa = output_ipa.with_suffix(output_ipa.suffix + ".tmp")
     if tmp_ipa.exists():
         tmp_ipa.unlink()
 
-    if use_custom_icon:
+    icon_dir = resolve_icon_dir(icon_theme)
+    use_custom_icon = icon_dir is not None
+    if icon_dir is not None:
         for fn in CUSTOM_ICON_FILES:
-            if not (ICON_ASSETS_DIR / fn).is_file():
-                raise BuildError(f"Missing custom iOS icon asset: {ICON_ASSETS_DIR / fn}")
+            if not (icon_dir / fn).is_file():
+                raise BuildError(f"Missing custom iOS icon asset: {icon_dir / fn}")
 
-    log(f"packaging {output_ipa} (bundle_id={bundle_id}, display_name={display_name!r}, custom_icon={use_custom_icon})...")
+    if preboot_dylib is not None and not preboot_dylib.is_file():
+        raise BuildError(f"Pre-boot dylib not found: {preboot_dylib}")
+
+    log(
+        f"packaging {output_ipa} (bundle_id={bundle_id}, display_name={display_name!r}, "
+        f"icon_theme={icon_theme}, preboot_dylib={'yes' if preboot_dylib else 'no'})..."
+    )
     t0 = time.monotonic()
 
     with zipfile.ZipFile(base_ipa, "r") as src_zf, zipfile.ZipFile(
@@ -1135,6 +1276,14 @@ def package_ipa(
             IPA_LAYOUT_JSON: layout_json_bytes,
             IPA_MANIFEST_JSON: manifest_json_bytes,
         }
+        if cmdline_bytes is not None:
+            replacements[IPA_CMDLINE_TXT] = cmdline_bytes
+
+        if preboot_dylib is not None:
+            raw_main = src_zf.read(IPA_MAIN_MACHO)
+            injected_main = macho_inject.inject_lc_load_dylib(raw_main, PREBOOT_DYLIB_LOAD_PATH)
+            replacements[IPA_MAIN_MACHO] = injected_main
+            log(f"  injected LC_LOAD_DYLIB ({PREBOOT_DYLIB_LOAD_PATH}) into {IPA_MAIN_MACHO}")
 
         ref_dt = src_zf.getinfo(IPA_INFO_PLIST).date_time
 
@@ -1171,14 +1320,40 @@ def package_ipa(
                     while chunk := f_in.read(COPY_CHUNK):
                         f_out.write(chunk)
 
-        if use_custom_icon:
+        if icon_dir is not None:
             for fn in CUSTOM_ICON_FILES:
-                icon_path = ICON_ASSETS_DIR / fn
+                icon_path = icon_dir / fn
                 zi = zipfile.ZipInfo(filename=IPA_APP_PREFIX + fn, date_time=ref_dt)
                 zi.create_system = 3
                 zi.external_attr = 0o100644 << 16
                 zi.compress_type = zipfile.ZIP_STORED  # PNG is already compressed
                 dst_zf.writestr(zi, icon_path.read_bytes(), compress_type=zipfile.ZIP_STORED)
+
+        if preboot_defaults_bytes is not None and (IOS_PREBOOT_SRC / "preboot.html").is_file():
+            bdir = zipfile.ZipInfo(filename=IPA_PREBOOT_BUNDLE, date_time=ref_dt)
+            bdir.create_system = 3
+            bdir.external_attr = 0o040755 << 16
+            bdir.compress_type = zipfile.ZIP_STORED
+            dst_zf.writestr(bdir, b"")
+
+            for fname, payload in (
+                ("preboot.html", read_text_lf(IOS_PREBOOT_SRC / "preboot.html")),
+                ("defaults.json", preboot_defaults_bytes),
+            ):
+                zi = zipfile.ZipInfo(filename=IPA_PREBOOT_BUNDLE + fname, date_time=ref_dt)
+                zi.create_system = 3
+                zi.external_attr = 0o100644 << 16
+                zi.compress_type = zipfile.ZIP_DEFLATED
+                dst_zf.writestr(zi, payload, compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
+            log("  bundled AndariumRootPreboot.bundle/{preboot.html,defaults.json}")
+
+        if preboot_dylib is not None:
+            zi = zipfile.ZipInfo(filename=IPA_PREBOOT_DYLIB, date_time=ref_dt)
+            zi.create_system = 3
+            zi.external_attr = 0o100755 << 16
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            dst_zf.writestr(zi, preboot_dylib.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
+            log(f"  bundled {IPA_PREBOOT_DYLIB} ({preboot_dylib.stat().st_size:,} B)")
 
     tmp_ipa.replace(output_ipa)
     elapsed = time.monotonic() - t0
@@ -1187,37 +1362,81 @@ def package_ipa(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build a rooted Andarium IPA (v3 Ultimate Edition)."
+        description="Build a customizable Andarium Root IPA (v4 Pre-Boot & Config Studio Edition)."
+    )
+    parser.add_argument(
+        "--preset",
+        choices=PRESET_NAMES,
+        default=None,
+        help="Role preset: mix, seceng, hacker, gamer, privacy, or unrooted",
     )
     parser.add_argument(
         "--profile",
         choices=("ultimate", "lite", "stealth"),
         default="ultimate",
-        help="Build preset: ultimate (all tools & apps), lite (compact core + microG), stealth (enforcing + hidden by default)",
+        help="Legacy v3 preset alias (ultimate=mix, lite=compact core+microG, stealth=enforcing+hidden)",
     )
-    parser.add_argument("--output", type=Path, default=None, help="Output IPA path (auto-named per profile if omitted)")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Declarative JSON config exported from Studio / Pre-Boot UI (overrides preset defaults)",
+    )
+    parser.add_argument(
+        "--apps",
+        default=None,
+        help="Comma-separated list of app IDs to preinstall on first boot (see manifests/presets.json)",
+    )
+    parser.add_argument(
+        "--shrink-apks",
+        action="store_true",
+        help="Physically omit unchecked APKs from odm.img to shrink IPA size (disables offline install of omitted apps)",
+    )
+    parser.add_argument(
+        "--icon-theme",
+        choices=ICON_THEMES,
+        default=None,
+        help="Custom iOS app icon theme (duskjade, crimson, cyber, stealth, or stock)",
+    )
+    parser.add_argument(
+        "--no-root",
+        action="store_true",
+        help="True build-time unrooted IPA: keep stock init_boot.img untouched (no Magisk/su) while applying icons & APKs",
+    )
+    parser.add_argument(
+        "--preboot-dylib",
+        type=Path,
+        default=None,
+        help="Compiled arm64 iOS AndariumRootPreboot.dylib to inject into Payload/Andarium.app/Andarium",
+    )
+    parser.add_argument(
+        "--no-preboot-dylib",
+        action="store_true",
+        help="Do not auto-inject assets/ios/AndariumRootPreboot.dylib even if present",
+    )
+    parser.add_argument("--output", type=Path, default=None, help="Output IPA path (auto-named per preset/profile if omitted)")
     parser.add_argument("--base-ipa", type=Path, help="Optional local stock Andarium IPA override (for CI / newer releases)")
     parser.add_argument("--bundle-id", default=None, help="iOS CFBundleIdentifier")
     parser.add_argument("--display-name", default=None, help="iOS CFBundleDisplayName")
-    parser.add_argument("--release-suffix", default="root", help="Suffix appended to release_id")
+    parser.add_argument("--release-suffix", default=None, help="Suffix appended to release_id")
     parser.add_argument(
         "--selinux",
         choices=("permissive", "enforcing"),
         default=None,
-        help="Default boot SELinux mode (defaults to permissive, or enforcing in stealth profile)",
+        help="Default boot SELinux mode",
     )
     parser.add_argument(
         "--default-stealth",
         choices=("off", "on"),
         default=None,
-        help="Boot directly into Stealth Mode (defaults to off, or on in stealth profile)",
+        help="Boot directly into Stealth Mode",
     )
     parser.add_argument("--custom-dir", type=Path, default=DEFAULT_CUSTOM_DIR, help="Drop-in custom/ overlay directory")
     parser.add_argument("--no-adbroot", action="store_true", help="Do not pre-enable /data/adbroot/enabled=1")
     parser.add_argument("--no-debuggable", action="store_true", help="Do not set ro.debuggable=1 at boot")
     parser.add_argument("--no-modules", action="store_true", help="Skip ReZygisk + Vector modules")
     parser.add_argument("--no-stealth", action="store_true", help="Skip PlayIntegrityFork + TrickyStore + Zygisk-Assistant")
-    parser.add_argument("--no-pentest", action="store_true", help="Skip Frida Server, CLI pentest tools & TrustMeAlready")
+    parser.add_argument("--no-pentest", action="store_true", help="Skip Frida Server, CLI pentest tools & pentest APKs")
     parser.add_argument("--no-network", action="store_true", help="Skip Dropbear SSH + StevenBlack ad-block hosts")
     parser.add_argument("--no-apps", action="store_true", help="Skip Termux + Material Files")
     parser.add_argument("--no-power-apps", action="store_true", help="Skip Aurora Store, Obtainium, App Manager, Shizuku, Neo Backup")
@@ -1229,38 +1448,152 @@ def parse_args() -> argparse.Namespace:
 
 
 def resolve_profile(args: argparse.Namespace) -> argparse.Namespace:
-    if args.profile == "lite":
+    presets_doc = load_presets_manifest()
+    presets = presets_doc["presets"]
+    catalog = presets_doc["app_catalog"]
+    all_app_ids = [item["id"] for item in catalog]
+
+    user_cfg: dict[str, object] = {}
+    if getattr(args, "config", None) is not None:
+        cfg_path = Path(args.config)
+        if not cfg_path.is_file():
+            raise BuildError(f"--config file not found: {cfg_path}")
+        user_cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+
+    # Determine base preset
+    if args.preset is not None:
+        preset_id = args.preset
+    elif isinstance(user_cfg.get("preset"), str) and user_cfg["preset"] in presets:
+        preset_id = str(user_cfg["preset"])
+    elif args.profile == "stealth":
+        preset_id = "privacy"
+    else:
+        preset_id = "mix"
+
+    base = json.loads(json.dumps(presets[preset_id]))
+    base["preset"] = preset_id
+
+    # Merge declarative --config on top of preset
+    for key in ("root_enabled", "selinux", "stealth", "adbroot", "debuggable", "proxy", "icon_theme", "bundle_id", "display_name", "apps", "shrink_apks", "build_unrooted"):
+        if key in user_cfg and user_cfg[key] is not None:
+            base[key] = user_cfg[key]
+    for sub in ("modules", "services", "tweaks"):
+        if isinstance(user_cfg.get(sub), dict):
+            base.setdefault(sub, {}).update(user_cfg[sub])
+
+    # Legacy --profile behaviors (only when --preset and --config weren't explicitly provided)
+    using_legacy_profile = args.preset is None and not user_cfg
+    if using_legacy_profile and args.profile == "lite":
         args.no_stealth = True
         args.no_pentest = True
         args.no_network = True
         args.no_power_apps = True
-        args.output = args.output or (ROOT_DIR / "dist" / "Andarium-Root-Lite-1.0-15.ipa")
-        args.bundle_id = args.bundle_id or "com.andarium.root.lite"
-        args.display_name = args.display_name or "Andarium Root Lite"
-        args.selinux = args.selinux or "permissive"
-        args.default_stealth = args.default_stealth or "off"
-    elif args.profile == "stealth":
+        base["bundle_id"] = "com.andarium.root.lite"
+        base["display_name"] = "Andarium Root Lite"
+        base["modules"] = {"rezygisk": True, "vector": True, "stealth_stack": False}
+        base["services"] = {"adblock": False, "frida_autostart": False, "ssh_autostart": False, "shizuku_autostart": False}
+        base["apps"] = ["magisk", "termux", "material_files", "microg_gms", "microg_vending"]
+        default_out = ROOT_DIR / "dist" / "Andarium-Root-Lite-1.0-15.ipa"
+    elif using_legacy_profile and args.profile == "stealth":
         args.no_pentest = True
         args.no_adbroot = True
         args.no_debuggable = True
-        args.output = args.output or (ROOT_DIR / "dist" / "Andarium-Root-Stealth-1.0-15.ipa")
-        args.bundle_id = args.bundle_id or "com.andarium.root.stealth"
-        args.display_name = args.display_name or "Andarium Stealth"
-        args.selinux = args.selinux or "enforcing"
-        args.default_stealth = args.default_stealth or "on"
-    else:  # ultimate
-        args.output = args.output or DEFAULT_OUTPUT
-        args.bundle_id = args.bundle_id or "com.andarium.root"
-        args.display_name = args.display_name or "Andarium Root"
-        args.selinux = args.selinux or "permissive"
-        args.default_stealth = args.default_stealth or "off"
+        base["bundle_id"] = "com.andarium.root.stealth"
+        base["display_name"] = "Andarium Stealth"
+        base["selinux"] = "enforcing"
+        base["stealth"] = True
+        base["adbroot"] = False
+        base["debuggable"] = False
+        default_out = ROOT_DIR / "dist" / "Andarium-Root-Stealth-1.0-15.ipa"
+    elif preset_id == "mix":
+        default_out = DEFAULT_OUTPUT
+    else:
+        slug = preset_id.capitalize()
+        default_out = ROOT_DIR / "dist" / f"Andarium-{slug}-1.0-15.ipa"
+
+    # Build-time unrooted flag
+    if base.get("build_unrooted"):
+        args.no_root = True
+    if args.no_root:
+        base["root_enabled"] = False
+        args.no_modules = True
+        args.no_stealth = True
+        args.no_pentest = True
+        args.no_network = True
+        args.no_adbroot = True
+        args.no_debuggable = True
+
+    # Apply explicit CLI overrides
+    if args.selinux is not None:
+        base["selinux"] = args.selinux
+    if args.default_stealth is not None:
+        base["stealth"] = args.default_stealth == "on"
+    if args.no_adbroot:
+        base["adbroot"] = False
+    if args.no_debuggable:
+        base["debuggable"] = False
+    if args.no_modules:
+        base["modules"]["rezygisk"] = False
+        base["modules"]["vector"] = False
+    if args.no_stealth:
+        base["modules"]["stealth_stack"] = False
+    if args.no_network:
+        base["services"]["adblock"] = False
+        base["services"]["ssh_autostart"] = False
+    if args.no_pentest:
+        base["services"]["frida_autostart"] = False
+
+    if args.apps is not None:
+        chosen = [a.strip() for a in args.apps.split(",") if a.strip()]
+        invalid = [a for a in chosen if a not in all_app_ids]
+        if invalid:
+            raise BuildError(f"Unknown app id(s) in --apps: {', '.join(invalid)}")
+        base["apps"] = chosen
+
+    if base.get("shrink_apks"):
+        args.shrink_apks = True
+
+    if args.no_custom_icon:
+        icon_theme = "stock"
+    elif args.icon_theme is not None:
+        icon_theme = args.icon_theme
+    else:
+        icon_theme = str(base.get("icon_theme", "duskjade"))
+        if icon_theme not in ICON_THEMES:
+            icon_theme = "duskjade"
+
+    args.icon_theme = icon_theme
+    args.no_custom_icon = icon_theme == "stock"
+    args.output = args.output or default_out
+    args.bundle_id = args.bundle_id or str(base.get("bundle_id", "com.andarium.root"))
+    args.display_name = args.display_name or str(base.get("display_name", "Andarium Root"))
+    args.selinux = str(base.get("selinux", "permissive"))
+    args.default_stealth = "on" if base.get("stealth", False) else "off"
+    args.no_adbroot = not bool(base.get("adbroot", True))
+    args.no_debuggable = not bool(base.get("debuggable", True))
+    args.release_suffix = args.release_suffix or ("clean" if args.no_root else "root")
+    args.effective_preset = preset_id
+    args.effective_config = base
+    args.presets_doc = presets_doc
+
+    # Auto-detect compiled iOS pre-boot dylib if present and not disabled
+    if not args.no_root and not args.no_preboot_dylib and args.preboot_dylib is None:
+        if DEFAULT_PREBOOT_DYLIB.is_file():
+            args.preboot_dylib = DEFAULT_PREBOOT_DYLIB
+    if args.no_root or args.no_preboot_dylib:
+        args.preboot_dylib = None
+
     return args
 
 
 def main() -> int:
     args = resolve_profile(parse_args())
     check_host_tools()
-    log(f"Profile={args.profile} | SELinux={args.selinux} | DefaultStealth={args.default_stealth} | BundleID={args.bundle_id}")
+    log(
+        f"Preset={args.effective_preset} | Profile={args.profile} | BuildRoot={'NO (--no-root)' if args.no_root else 'YES'} | "
+        f"DefaultRoot={'ON' if args.effective_config.get('root_enabled', True) else 'HIDDEN'} | "
+        f"SELinux={args.selinux} | Stealth={args.default_stealth} | Icon={args.icon_theme} | BundleID={args.bundle_id}"
+    )
 
     artifacts = json.loads((MANIFESTS_DIR / "artifacts.json").read_text(encoding="utf-8"))
 
@@ -1273,20 +1606,20 @@ def main() -> int:
     else:
         base_ipa = ensure_artifact(artifacts["base_ipa"], CACHE_DIR)
 
-    magisk_apk = ensure_artifact(artifacts["magisk"], CACHE_DIR)
+    magisk_apk = None if args.no_root else ensure_artifact(artifacts["magisk"], CACHE_DIR)
 
-    rezygisk_zip = None if args.no_modules else ensure_artifact(artifacts["modules"]["rezygisk"], CACHE_DIR)
-    vector_zip = None if args.no_modules else ensure_artifact(artifacts["modules"]["vector"], CACHE_DIR)
-    pif_zip = None if args.no_stealth else ensure_artifact(artifacts["modules"]["playintegrityfork"], CACHE_DIR)
-    trickystore_zip = None if args.no_stealth else ensure_artifact(artifacts["modules"]["trickystore"], CACHE_DIR)
-    zygisk_assistant_zip = None if args.no_stealth else ensure_artifact(artifacts["modules"]["zygisk_assistant"], CACHE_DIR)
+    rezygisk_zip = None if (args.no_root or args.no_modules) else ensure_artifact(artifacts["modules"]["rezygisk"], CACHE_DIR)
+    vector_zip = None if (args.no_root or args.no_modules) else ensure_artifact(artifacts["modules"]["vector"], CACHE_DIR)
+    pif_zip = None if (args.no_root or args.no_stealth) else ensure_artifact(artifacts["modules"]["playintegrityfork"], CACHE_DIR)
+    trickystore_zip = None if (args.no_root or args.no_stealth) else ensure_artifact(artifacts["modules"]["trickystore"], CACHE_DIR)
+    zygisk_assistant_zip = None if (args.no_root or args.no_stealth) else ensure_artifact(artifacts["modules"]["zygisk_assistant"], CACHE_DIR)
 
-    frida_xz = None if args.no_pentest else ensure_artifact(artifacts["tools"]["frida_server"], CACHE_DIR)
-    dropbear_zip = None if args.no_network else ensure_artifact(artifacts["tools"]["dropbear"], CACHE_DIR)
-    hosts_txt = None if args.no_network else ensure_artifact(artifacts["tools"]["stevenblack_hosts"], CACHE_DIR)
+    frida_xz = None if (args.no_root or args.no_pentest) else ensure_artifact(artifacts["tools"]["frida_server"], CACHE_DIR)
+    dropbear_zip = None if (args.no_root or args.no_network) else ensure_artifact(artifacts["tools"]["dropbear"], CACHE_DIR)
+    hosts_txt = None if (args.no_root or args.no_network) else ensure_artifact(artifacts["tools"]["stevenblack_hosts"], CACHE_DIR)
 
     cli_tools: dict[str, Path] = {}
-    if not args.no_pentest:
+    if not args.no_root and not args.no_pentest:
         for tname in ("strace", "socat", "sqlite3", "jq", "tcpdump"):
             cli_tools[tname] = ensure_artifact(artifacts["tools"][tname], CACHE_DIR)
 
@@ -1294,12 +1627,20 @@ def main() -> int:
         "apps": not args.no_apps,
         "microg": not args.no_microg,
         "power_apps": not args.no_power_apps,
-        "pentest": not args.no_pentest,
+        "pentest": (not args.no_pentest) and (not args.no_root),
     }
+    selected_app_ids = set(args.effective_config.get("apps") or [])
     extra_apks: list[tuple[str, Path]] = []
-    for _key, entry in artifacts["apks"].items():
-        if apk_groups_enabled.get(str(entry["group"]), False):
-            extra_apks.append((str(entry["install_name"]), ensure_artifact(entry, CACHE_DIR)))
+    staged_apk_names: list[str] = [] if args.no_root else ["01-magisk.apk"]
+    for app_key, entry in artifacts["apks"].items():
+        if args.no_root or args.shrink_apks:
+            if app_key not in selected_app_ids:
+                continue
+        else:
+            if not apk_groups_enabled.get(str(entry["group"]), False):
+                continue
+        extra_apks.append((str(entry["install_name"]), ensure_artifact(entry, CACHE_DIR)))
+        staged_apk_names.append(str(entry["install_name"]))
 
     work_dir = Path(tempfile.mkdtemp(prefix="andarium_root_build_"))
     log(f"Linux staging directory: {work_dir}")
@@ -1311,19 +1652,23 @@ def main() -> int:
         stock_init_boot_copy = work_dir / "stock_init_boot.img"
         shutil.copy2(part_paths["init_boot"], stock_init_boot_copy)
 
-        log("=== Step 3/7: Patching init_boot.img with Magisk v31.1 ===")
-        patched_init_boot = work_dir / "patched_init_boot.img"
-        patch_init_boot(
-            stock_init_boot_copy,
-            magisk_apk,
-            patched_init_boot,
-            work_dir,
-            selinux_mode=args.selinux,
-            enable_debuggable=not args.no_debuggable,
-            enable_adbroot=not args.no_adbroot,
-            default_stealth=args.default_stealth,
-        )
-        shutil.copy2(patched_init_boot, part_paths["init_boot"])
+        if args.no_root:
+            log("=== Step 3/7: Skipping init_boot.img patch (--no-root: keeping stock init_boot untouched) ===")
+        else:
+            log("=== Step 3/7: Patching init_boot.img with Magisk v31.1 ===")
+            patched_init_boot = work_dir / "patched_init_boot.img"
+            assert magisk_apk is not None
+            patch_init_boot(
+                stock_init_boot_copy,
+                magisk_apk,
+                patched_init_boot,
+                work_dir,
+                selinux_mode=args.selinux,
+                enable_debuggable=not args.no_debuggable,
+                enable_adbroot=not args.no_adbroot,
+                default_stealth=args.default_stealth,
+            )
+            shutil.copy2(patched_init_boot, part_paths["init_boot"])
 
         log("=== Step 4/7: Building augmented odm.img EROFS ===")
         stock_odm_copy = work_dir / "stock_odm.img"
@@ -1348,6 +1693,8 @@ def main() -> int:
             selinux_mode=args.selinux,
             enable_debuggable=not args.no_debuggable,
             default_stealth=args.default_stealth,
+            build_unrooted=args.no_root,
+            effective_config=args.effective_config,
         )
         shutil.copy2(patched_odm, part_paths["odm"])
 
@@ -1355,13 +1702,33 @@ def main() -> int:
         disk_out_dir = work_dir / "assembled_disk"
         system_img, layout_json_path = assemble_system_disk(part_dir, disk_out_dir)
 
-        log("=== Step 6/7: Packaging final rooted IPA ===")
+        log("=== Step 6/7: Packaging final IPA ===")
+        with zipfile.ZipFile(base_ipa, "r") as zf:
+            stock_cmdline = zf.read(IPA_CMDLINE_TXT)
+
+        cmdline_bytes: bytes | None = None
+        preboot_defaults_bytes: bytes | None = None
+        if not args.no_root:
+            cmdline_bytes = encode_preboot_cmdline(
+                stock_cmdline,
+                args.effective_config,
+                args.presets_doc["app_catalog"],
+            )
+            defaults_payload = {
+                "schema_version": 4,
+                "app_catalog": args.presets_doc["app_catalog"],
+                "presets": args.presets_doc["presets"],
+                "default_config": args.effective_config,
+            }
+            preboot_defaults_bytes = (json.dumps(defaults_payload, indent=2) + "\n").encode("utf-8")
+
         layout_json_bytes = layout_json_path.read_bytes()
         manifest_json_bytes = update_release_manifest(
             stock_manifest,
             system_img.stat().st_size,
             len(layout_json_bytes),
             release_suffix=args.release_suffix,
+            cmdline_size=len(cmdline_bytes) if cmdline_bytes is not None else None,
         )
 
         output_ipa = args.output.resolve()
@@ -1371,9 +1738,12 @@ def main() -> int:
             system_img=system_img,
             layout_json_bytes=layout_json_bytes,
             manifest_json_bytes=manifest_json_bytes,
+            cmdline_bytes=cmdline_bytes,
             bundle_id=args.bundle_id,
             display_name=args.display_name,
-            use_custom_icon=not args.no_custom_icon,
+            icon_theme=args.icon_theme,
+            preboot_defaults_bytes=preboot_defaults_bytes,
+            preboot_dylib=args.preboot_dylib,
         )
 
         if not args.skip_verify:
@@ -1391,8 +1761,12 @@ def main() -> int:
                 args.display_name,
                 "--expected-selinux",
                 args.selinux,
+                "--expected-apks",
+                ",".join(staged_apk_names),
             ]
             for flag_name, flag_val in (
+                ("--no-root", args.no_root),
+                ("--expect-preboot-dylib", args.preboot_dylib is not None),
                 ("--no-modules", args.no_modules),
                 ("--no-stealth", args.no_stealth),
                 ("--no-pentest", args.no_pentest),

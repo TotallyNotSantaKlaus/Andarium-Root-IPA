@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Andarium Pre-Boot Studio</title>
+<style>
+  :root {
+    --bg: #060b09;
+    --card: #0e1815;
+    --card2: #13221d;
+    --border: #1e3830;
+    --accent: #34f5a1;
+    --accent-dim: rgba(52,245,161,0.14);
+    --danger: #ff5c77;
+    --text: #e8f5ef;
+    --muted: #84a498;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: 14px; padding-bottom: 92px;
+    background: radial-gradient(circle at 50% 0%, #102a20 0%, var(--bg) 52%);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+    font-size: 14px; line-height: 1.4;
+  }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .logo {
+    width: 38px; height: 38px; border-radius: 11px;
+    background: linear-gradient(135deg, #0d271e, #06110d);
+    border: 1.5px solid var(--accent);
+    display: grid; place-items: center; color: var(--accent);
+    font-weight: 800; font-size: 21px;
+  }
+  h1 { margin: 0; font-size: 18px; }
+  .sub { font-size: 11.5px; color: var(--muted); }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 13px 14px; margin-bottom: 12px;
+  }
+  .card h2 {
+    margin: 0 0 10px; font-size: 12.5px; color: var(--accent);
+    text-transform: uppercase; letter-spacing: 0.7px;
+  }
+  .preset-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .preset-btn {
+    text-align: left; padding: 10px 11px; border-radius: 12px;
+    border: 1px solid var(--border); background: #0a1310; color: var(--text);
+    cursor: pointer; transition: 0.14s ease;
+  }
+  .preset-btn.active { border-color: var(--accent); background: var(--accent-dim); }
+  .preset-btn .pt { font-weight: 700; font-size: 13.5px; margin-bottom: 3px; }
+  .preset-btn .pd { font-size: 11px; color: var(--muted); line-height: 1.3; }
+  .row {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 9px 0; border-top: 1px solid rgba(255,255,255,0.05);
+  }
+  .row:first-of-type { border-top: none; padding-top: 2px; }
+  .rt { font-weight: 600; font-size: 14px; }
+  .rd { font-size: 11.5px; color: var(--muted); }
+  .switch {
+    position: relative; width: 46px; height: 26px; flex-shrink: 0;
+  }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; inset: 0; border-radius: 999px;
+    background: #1b2c26; border: 1px solid var(--border); transition: 0.18s; cursor: pointer;
+  }
+  .slider:before {
+    content: ""; position: absolute; width: 20px; height: 20px; left: 2px; top: 2px;
+    border-radius: 50%; background: #9db8ae; transition: 0.18s;
+  }
+  .switch input:checked + .slider { background: var(--accent-dim); border-color: var(--accent); }
+  .switch input:checked + .slider:before { transform: translateX(20px); background: var(--accent); }
+  .app-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; }
+  .app-chip {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    border-radius: 10px; border: 1px solid var(--border); background: #0a1310;
+    font-size: 12.5px; cursor: pointer;
+  }
+  .app-chip input { accent-color: var(--accent); width: 16px; height: 16px; }
+  select, input[type="text"] {
+    background: #09120f; border: 1px solid var(--border); border-radius: 9px;
+    color: var(--text); padding: 7px 10px; font-size: 13px; outline: none;
+  }
+  select:focus, input[type="text"]:focus { border-color: var(--accent); }
+  .bar {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    background: rgba(7,13,11,0.95); backdrop-filter: blur(12px);
+    border-top: 1px solid var(--border); padding: 12px 14px;
+    display: flex; gap: 8px;
+  }
+  .btn {
+    border: 1px solid var(--border); background: var(--card2); color: var(--text);
+    padding: 11px 14px; border-radius: 11px; font-size: 14px; font-weight: 700; cursor: pointer;
+  }
+  .btn.primary { flex: 1; border-color: var(--accent); background: var(--accent); color: #04130c; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">#</div>
+    <div>
+      <h1>Pre-Boot Setup</h1>
+      <div class="sub">Configure Android BEFORE clicking Start Emulation</div>
+    </div>
+  </div>
+  <button class="btn" style="padding:7px 12px;font-size:12px;" onclick="closeSheet()">Close</button>
+</header>
+
+<div class="card">
+  <h2>1. Choose a Role Preset</h2>
+  <div class="preset-grid" id="preset-grid"></div>
+</div>
+
+<div class="card">
+  <h2>2. Root &amp; Core Security</h2>
+  <div class="row">
+    <div><div class="rt">Root Access (Magisk v31.1)</div><div class="rd">Toggle OFF for hidden/unrooted boot without wiping data</div></div>
+    <label class="switch"><input type="checkbox" id="f-root"><span class="slider"></span></label>
+  </div>
+  <div class="row">
+    <div><div class="rt">Stealth Mode</div><div class="rd">Enforcing SELinux, DenyList ON, hides debuggable &amp; stops Frida/SSH</div></div>
+    <label class="switch"><input type="checkbox" id="f-stealth"><span class="slider"></span></label>
+  </div>
+  <div class="row">
+    <div><div class="rt">SELinux Policy</div><div class="rd">Permissive for root/RE, Enforcing for gaming/banking</div></div>
+    <select id="f-selinux">
+      <option value="permissive">Permissive</option>
+      <option value="enforcing">Enforcing</option>
+    </select>
+  </div>
+  <div class="row">
+    <div><div class="rt">Native ADB Root</div><div class="rd">Unlock `adb root` while keeping default shell mode for iOS features</div></div>
+    <label class="switch"><input type="checkbox" id="f-adbroot"><span class="slider"></span></label>
+  </div>
+  <div class="row">
+    <div><div class="rt">ro.debuggable=1</div><div class="rd">Enables JDWP debugging &amp; adb root</div></div>
+    <label class="switch"><input type="checkbox" id="f-dbg"><span class="slider"></span></label>
+  </div>
+</div>
+
+<div class="card">
+  <h2>3. Modules &amp; Services</h2>
+  <div class="row">
+    <div><div class="rt">ReZygisk</div><div class="rd">Standalone Zygisk runtime</div></div>
+    <label class="switch"><input type="checkbox" id="m-rezygisk"><span class="slider"></span></label>
+  </div>
+  <div class="row">
+    <div><div class="rt">Vector (LSPosed Android 17)</div><div class="rd">Xposed hooking framework (SSL bypass, FLAG_SECURE, GPS)</div></div>
+    <label class="switch"><input type="checkbox" id="m-vector"><span class="slider"></span></label>
+  </div>
+  <div class="row">
+    <div><div class="rt">Play Integrity &amp; Root-Hiding Stack</div><div class="rd">PlayIntegrityFork + TrickyStore + Zygisk-Assistant</div></div>
+    <label class="switch"><input type="checkbox" id="m-stealth-stack"><span class="slider"></span></label>
+  </div>
+  <div class="row">
+    <div><div class="rt">Systemless Ad-Block</div><div class="rd">StevenBlack unified hosts over /system/etc/hosts</div></div>
+    <label class="switch"><input type="checkbox" id="s-adblock"><span class="slider"></span></label>
+  </div>
+  <div class="row">
+    <div><div class="rt">Frida Server Autostart</div><div class="rd">Auto-launch frida-server on boot (port 27042)</div></div>
+    <label class="switch"><input type="checkbox" id="s-frida"><span class="slider"></span></label>
+  </div>
+  <div class="row">
+    <div><div class="rt">Dropbear SSH Autostart</div><div class="rd">Auto-launch SSH/SCP server on boot (port 2222)</div></div>
+    <label class="switch"><input type="checkbox" id="s-ssh"><span class="slider"></span></label>
+  </div>
+  <div class="row">
+    <div><div class="rt">Shizuku Auto-Start</div><div class="rd">Start privileged Shizuku server as root on boot</div></div>
+    <label class="switch"><input type="checkbox" id="s-shizuku"><span class="slider"></span></label>
+  </div>
+  <div class="row">
+    <div><div class="rt">Global HTTP Proxy</div><div class="rd">Optional Burp/mitmproxy host:port</div></div>
+    <input type="text" id="f-proxy" placeholder="off (host:port)" style="width:155px;">
+  </div>
+</div>
+
+<div class="card">
+  <h2>4. Preinstalled Apps (First Boot)</h2>
+  <div class="app-grid" id="app-grid"></div>
+</div>
+
+<div class="card">
+  <h2>5. Performance &amp; Display Tweaks</h2>
+  <div class="row">
+    <div><div class="rt">Animation Scale</div><div class="rd">0x = instant (best for Gaming / Hacker)</div></div>
+    <select id="t-anim">
+      <option value="0">0x (Instant)</option>
+      <option value="0.5">0.5x (Snappy)</option>
+      <option value="1">1x (Stock)</option>
+    </select>
+  </div>
+  <div class="row">
+    <div><div class="rt">zRAM Swappiness</div><div class="rd">Higher compresses more RAM for heavy games/apps</div></div>
+    <select id="t-swap">
+      <option value="60">60 (Stock)</option>
+      <option value="80">80 (Balanced)</option>
+      <option value="100">100 (High)</option>
+      <option value="130">130 (Gamer Max)</option>
+    </select>
+  </div>
+  <div class="row">
+    <div><div class="rt">Display DPI</div><div class="rd">Override Android scaling density</div></div>
+    <select id="t-dpi">
+      <option value="0">Default</option>
+      <option value="320">320 DPI (Sharp)</option>
+      <option value="360">360 DPI (Compact)</option>
+      <option value="420">420 DPI (Balanced)</option>
+    </select>
+  </div>
+  <div class="row">
+    <div><div class="rt">Stay Awake</div><div class="rd">Keep guest display awake while running</div></div>
+    <label class="switch"><input type="checkbox" id="t-awake"><span class="slider"></span></label>
+  </div>
+</div>
+
+<div class="bar">
+  <button class="btn" onclick="exportCfg()">Export JSON</button>
+  <button class="btn primary" onclick="saveCfg()">Save &amp; Apply on Start</button>
+</div>
+
+<script>
+let DATA = { presets: {}, app_catalog: [] };
+let CFG = {};
+
+function renderPresets() {
+  const g = document.getElementById("preset-grid");
+  g.innerHTML = "";
+  Object.entries(DATA.presets || {}).forEach(([id, p]) => {
+    const b = document.createElement("button");
+    b.className = "preset-btn" + (CFG.preset === id ? " active" : "");
+    b.onclick = () => applyPreset(id);
+    const t = document.createElement("div"); t.className = "pt"; t.textContent = p.name;
+    const d = document.createElement("div"); d.className = "pd"; d.textContent = p.tagline;
+    b.appendChild(t); b.appendChild(d);
+    g.appendChild(b);
+  });
+}
+
+function renderApps() {
+  const g = document.getElementById("app-grid");
+  g.innerHTML = "";
+  const active = new Set(CFG.apps || []);
+  (DATA.app_catalog || []).forEach(app => {
+    const lbl = document.createElement("label");
+    lbl.className = "app-chip";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = active.has(app.id);
+    cb.dataset.appId = app.id;
+    const span = document.createElement("span");
+    span.textContent = app.label;
+    lbl.appendChild(cb); lbl.appendChild(span);
+    g.appendChild(lbl);
+  });
+}
+
+function syncFormFromCfg() {
+  document.getElementById("f-root").checked = CFG.root_enabled !== false;
+  document.getElementById("f-stealth").checked = Boolean(CFG.stealth);
+  document.getElementById("f-selinux").value = CFG.selinux || "permissive";
+  document.getElementById("f-adbroot").checked = CFG.adbroot !== false;
+  document.getElementById("f-dbg").checked = CFG.debuggable !== false;
+  document.getElementById("f-proxy").value = CFG.proxy || "";
+
+  const m = CFG.modules || {};
+  document.getElementById("m-rezygisk").checked = m.rezygisk !== false;
+  document.getElementById("m-vector").checked = m.vector !== false;
+  document.getElementById("m-stealth-stack").checked = m.stealth_stack !== false;
+
+  const s = CFG.services || {};
+  document.getElementById("s-adblock").checked = s.adblock !== false;
+  document.getElementById("s-frida").checked = Boolean(s.frida_autostart);
+  document.getElementById("s-ssh").checked = Boolean(s.ssh_autostart);
+  document.getElementById("s-shizuku").checked = s.shizuku_autostart !== false;
+
+  const t = CFG.tweaks || {};
+  document.getElementById("t-anim").value = String(t.anim_scale ?? "0.5");
+  document.getElementById("t-swap").value = String(t.swappiness ?? 100);
+  document.getElementById("t-dpi").value = String(t.dpi === "default" || !t.dpi ? "0" : t.dpi);
+  document.getElementById("t-awake").checked = Boolean(t.stay_awake);
+
+  renderPresets();
+  renderApps();
+}
+
+function applyPreset(id) {
+  const p = DATA.presets[id];
+  if (!p) return;
+  CFG = JSON.parse(JSON.stringify(p));
+  CFG.preset = id;
+  syncFormFromCfg();
+}
+
+function readCfgFromForm() {
+  const apps = [];
+  document.querySelectorAll("#app-grid input[type=checkbox]").forEach(cb => {
+    if (cb.checked) apps.push(cb.dataset.appId);
+  });
+  return {
+    preset: CFG.preset || "custom",
+    root_enabled: document.getElementById("f-root").checked,
+    stealth: document.getElementById("f-stealth").checked,
+    selinux: document.getElementById("f-selinux").value,
+    adbroot: document.getElementById("f-adbroot").checked,
+    debuggable: document.getElementById("f-dbg").checked,
+    proxy: document.getElementById("f-proxy").value.trim(),
+    modules: {
+      rezygisk: document.getElementById("m-rezygisk").checked,
+      vector: document.getElementById("m-vector").checked,
+      stealth_stack: document.getElementById("m-stealth-stack").checked,
+    },
+    services: {
+      adblock: document.getElementById("s-adblock").checked,
+      frida_autostart: document.getElementById("s-frida").checked,
+      ssh_autostart: document.getElementById("s-ssh").checked,
+      shizuku_autostart: document.getElementById("s-shizuku").checked,
+    },
+    tweaks: {
+      anim_scale: document.getElementById("t-anim").value,
+      swappiness: Number(document.getElementById("t-swap").value),
+      dpi: document.getElementById("t-dpi").value,
+      stay_awake: document.getElementById("t-awake").checked,
+    },
+    apps: apps,
+  };
+}
+
+function postNative(msg) {
+  if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.andariumPreboot) {
+    window.webkit.messageHandlers.andariumPreboot.postMessage(msg);
+  }
+}
+
+function saveCfg() {
+  CFG = readCfgFromForm();
+  postNative({ type: "save", config: CFG });
+}
+function exportCfg() {
+  postNative({ type: "export", text: JSON.stringify(readCfgFromForm(), null, 2) });
+}
+function closeSheet() {
+  postNative({ type: "close" });
+}
+
+window.__andariumInit = function(payload) {
+  DATA = payload.defaults || DATA;
+  CFG = payload.config || {};
+  if (!CFG.preset && DATA.presets && DATA.presets.mix) {
+    applyPreset("mix");
+  } else {
+    syncFormFromCfg();
+  }
+};
+</script>
+</body>
+</html>

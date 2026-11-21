@@ -1,7 +1,6 @@
 #!/system/bin/sh
 # SPDX-License-Identifier: GPL-2.0-or-later
-# andarium-ctl — Unified root control & telemetry CLI for Andarium Root (v3).
-# Available directly on root PATH ($MAGISKTMP/andarium-ctl and /data/adb/andarium-ctl).
+# andarium-ctl — Unified root control, preset & telemetry CLI for Andarium Root (v4).
 
 STATE_DIR="/data/adb/andarium"
 RUN_DIR="$STATE_DIR/run"
@@ -14,6 +13,7 @@ BB="/data/adb/magisk/busybox"
 [ -x "$BB" ] || BB="$ODM_ROOT/magisk-bin/busybox"
 MAGISK="$(command -v magisk 2>/dev/null || echo /debug_ramdisk/magisk)"
 [ -x "$MAGISK" ] || MAGISK="/sbin/magisk"
+MAGISKTMP="$(dirname "$MAGISK")"
 
 if [ "$(id -u)" != "0" ]; then
     echo "andarium-ctl: must be run as root (try: su -c '$0 $*')" >&2
@@ -54,25 +54,21 @@ is_pid_running() {
 }
 
 find_frida_bin() {
-    if [ -x "$ODM_ROOT/tools/frida-server" ]; then
-        printf '%s' "$ODM_ROOT/tools/frida-server"
-        return 0
-    fi
+    [ -x "$ODM_ROOT/tools/frida-server" ] && { printf '%s' "$ODM_ROOT/tools/frida-server"; return 0; }
     return 1
 }
 
 find_dropbear_dir() {
-    if [ -x "$ODM_ROOT/tools/dropbear/dropbear" ]; then
-        printf '%s' "$ODM_ROOT/tools/dropbear"
-        return 0
-    fi
+    [ -x "$ODM_ROOT/tools/dropbear/dropbear" ] && { printf '%s' "$ODM_ROOT/tools/dropbear"; return 0; }
     return 1
 }
 
+root_su_status() {
+    if [ -e "$MAGISKTMP/su" ]; then echo "active"; else echo "hidden"; fi
+}
+
 frida_status() {
-    if is_pid_running "$RUN_DIR/frida.pid"; then
-        echo "running"
-    elif "$BB" pidof frida-server >/dev/null 2>&1; then
+    if is_pid_running "$RUN_DIR/frida.pid" || "$BB" pidof frida-server >/dev/null 2>&1; then
         echo "running"
     else
         echo "stopped"
@@ -80,9 +76,7 @@ frida_status() {
 }
 
 ssh_status() {
-    if is_pid_running "$RUN_DIR/dropbear.pid"; then
-        echo "running"
-    elif "$BB" pidof dropbear >/dev/null 2>&1; then
+    if is_pid_running "$RUN_DIR/dropbear.pid" || "$BB" pidof dropbear >/dev/null 2>&1; then
         echo "running"
     else
         echo "stopped"
@@ -90,19 +84,11 @@ ssh_status() {
 }
 
 webui_status() {
-    if is_pid_running "$RUN_DIR/httpd.pid"; then
-        echo "running"
-    else
-        echo "stopped"
-    fi
+    if is_pid_running "$RUN_DIR/httpd.pid"; then echo "running"; else echo "stopped"; fi
 }
 
 shizuku_status() {
-    if "$BB" ps -ef 2>/dev/null | "$BB" grep -q '[s]hizuku_server'; then
-        echo "running"
-    else
-        echo "stopped"
-    fi
+    if "$BB" ps -ef 2>/dev/null | "$BB" grep -q '[s]hizuku_server'; then echo "running"; else echo "stopped"; fi
 }
 
 adblock_status() {
@@ -122,46 +108,58 @@ proxy_current() {
     esac
 }
 
+anim_current() {
+    v="$(settings get global animator_duration_scale 2>/dev/null | tr -d '\r\n ')"
+    case "$v" in ''|'null') printf '1.0' ;; *) printf '%s' "$v" ;; esac
+}
+
+awake_current() {
+    v="$(settings get global stay_on_while_plugged_in 2>/dev/null | tr -d '\r\n ')"
+    case "$v" in ''|'0'|'null') printf '0' ;; *) printf '1' ;; esac
+}
+
+swappiness_current() {
+    cat /proc/sys/vm/swappiness 2>/dev/null | tr -d '\r\n ' || echo 60
+}
+
 display_density_current() {
     out="$(wm density 2>/dev/null)"
     ov="$(printf '%s\n' "$out" | "$BB" awk -F': ' '/Override density/{print $2; exit}')"
     ph="$(printf '%s\n' "$out" | "$BB" awk -F': ' '/Physical density/{print $2; exit}')"
-    if [ -n "$ov" ]; then
-        printf '%s (override; physical %s)' "$ov" "${ph:-?}"
-    else
-        printf '%s' "${ph:-unknown}"
-    fi
+    if [ -n "$ov" ]; then printf '%s (override; physical %s)' "$ov" "${ph:-?}"; else printf '%s' "${ph:-unknown}"; fi
 }
 
 display_size_current() {
     out="$(wm size 2>/dev/null)"
     ov="$(printf '%s\n' "$out" | "$BB" awk -F': ' '/Override size/{print $2; exit}')"
     ph="$(printf '%s\n' "$out" | "$BB" awk -F': ' '/Physical size/{print $2; exit}')"
-    if [ -n "$ov" ]; then
-        printf '%s (override; physical %s)' "$ov" "${ph:-?}"
-    else
-        printf '%s' "${ph:-unknown}"
-    fi
+    if [ -n "$ov" ]; then printf '%s (override; physical %s)' "$ov" "${ph:-?}"; else printf '%s' "${ph:-unknown}"; fi
 }
 
 certs_count_extra() {
     cnt=0
     for dir in /data/misc/user/0/cacerts-added "$ODM_ROOT/custom/certs"; do
         if [ -d "$dir" ]; then
-            for f in "$dir"/*; do
-                [ -f "$f" ] && cnt=$((cnt + 1))
-            done
+            for f in "$dir"/*; do [ -f "$f" ] && cnt=$((cnt + 1)); done
         fi
     done
     printf '%s' "$cnt"
 }
 
 certs_status() {
-    if "$BB" grep -q '/apex/com.android.conscrypt/cacerts' /proc/mounts 2>/dev/null; then
-        echo "mounted"
-    else
-        echo "stock"
+    if "$BB" grep -q '/apex/com.android.conscrypt/cacerts' /proc/mounts 2>/dev/null; then echo "mounted"; else echo "stock"; fi
+}
+
+resolve_pkg_uid() {
+    pkg="$1"
+    uid="$("$BB" stat -c %u "/data/data/$pkg" 2>/dev/null || true)"
+    if [ -z "$uid" ] || [ "$uid" = "0" ]; then
+        uid="$(dumpsys package "$pkg" 2>/dev/null | "$BB" grep -m1 -E 'appId=|userId=' | "$BB" sed -E 's/.*(appId|userId)=([0-9]+).*/\2/' || true)"
     fi
+    case "$uid" in
+        ''|*[!0-9]*) return 1 ;;
+        *) printf '%s' "$uid"; return 0 ;;
+    esac
 }
 
 cmd_selinux() {
@@ -176,10 +174,7 @@ cmd_selinux() {
             write_state selinux_mode enforcing
             echo "SELinux set to Enforcing (persistent)"
             ;;
-        *)
-            echo "Usage: $0 selinux permissive|enforcing" >&2
-            exit 2
-            ;;
+        *) echo "Usage: $0 selinux permissive|enforcing" >&2; exit 2 ;;
     esac
 }
 
@@ -191,7 +186,7 @@ cmd_adbroot() {
             restorecon -R /data/adbroot 2>/dev/null || true
             write_state adbroot 1
             "$MAGISK" resetprop ro.debuggable 1 2>/dev/null || true
-            echo "Native adb root enabled (run 'adb root' from host)"
+            echo "Native adb root enabled"
             ;;
         off|0)
             mkdir -p /data/adbroot && chmod 0700 /data/adbroot && chown 0:0 /data/adbroot
@@ -201,29 +196,15 @@ cmd_adbroot() {
             setprop service.adb.root 0 2>/dev/null || true
             echo "Native adb root disabled"
             ;;
-        *)
-            echo "Usage: $0 adbroot on|off" >&2
-            exit 2
-            ;;
+        *) echo "Usage: $0 adbroot on|off" >&2; exit 2 ;;
     esac
 }
 
 cmd_debuggable() {
     case "$1" in
-        on|1)
-            "$MAGISK" resetprop ro.debuggable 1
-            write_state debuggable 1
-            echo "ro.debuggable=1 (persistent)"
-            ;;
-        off|0)
-            "$MAGISK" resetprop ro.debuggable 0
-            write_state debuggable 0
-            echo "ro.debuggable=0 (persistent)"
-            ;;
-        *)
-            echo "Usage: $0 debuggable on|off" >&2
-            exit 2
-            ;;
+        on|1) "$MAGISK" resetprop ro.debuggable 1; write_state debuggable 1; echo "ro.debuggable=1 (persistent)" ;;
+        off|0) "$MAGISK" resetprop ro.debuggable 0; write_state debuggable 0; echo "ro.debuggable=0 (persistent)" ;;
+        *) echo "Usage: $0 debuggable on|off" >&2; exit 2 ;;
     esac
 }
 
@@ -252,7 +233,7 @@ cmd_stealth() {
             setprop service.adb.root 0 2>/dev/null || true
             cmd_frida stop >/dev/null 2>&1 || true
             cmd_ssh stop >/dev/null 2>&1 || true
-            echo "Stealth Mode ENABLED (SELinux Enforcing, ro.debuggable=0, DenyList ON, adb root/Frida/SSH stopped)"
+            echo "Stealth Mode ENABLED"
             ;;
         off|0)
             write_state stealth_mode off
@@ -267,160 +248,192 @@ cmd_stealth() {
             fi
             mkdir -p /data/adbroot 2>/dev/null && printf '1' > /data/adbroot/enabled
             restorecon -R /data/adbroot 2>/dev/null || true
-            echo "Stealth Mode DISABLED (Dev/Root Mode: SELinux Permissive, ro.debuggable=1, adb root ON)"
+            echo "Stealth Mode DISABLED (Dev/Root Mode)"
+            ;;
+        status) echo "stealth_mode=$(read_state stealth_mode off)" ;;
+        *) echo "Usage: $0 stealth on|off|status" >&2; exit 2 ;;
+    esac
+}
+
+cmd_root() {
+    case "${1:-status}" in
+        hide|off|0)
+            write_state root_enabled 0
+            rm -f "$MAGISKTMP/su" 2>/dev/null || true
+            cmd_stealth on >/dev/null 2>&1 || true
+            pm disable-user --user 0 com.topjohnwu.magisk >/dev/null 2>&1 || true
+            echo "Root HIDDEN (su removed from PATH, Magisk Manager disabled, Stealth ON)"
+            ;;
+        restore|on|1)
+            write_state root_enabled 1
+            if [ -x "$MAGISK" ] && [ ! -e "$MAGISKTMP/su" ]; then
+                ln -sf "$MAGISK" "$MAGISKTMP/su" 2>/dev/null || true
+            fi
+            pm enable com.topjohnwu.magisk >/dev/null 2>&1 || true
+            echo "Root RESTORED (su active in $MAGISKTMP, Magisk Manager enabled)"
             ;;
         status)
-            echo "stealth_mode=$(read_state stealth_mode off)"
+            echo "root_su=$(root_su_status) saved=$(read_state root_enabled 1)"
             ;;
-        *)
-            echo "Usage: $0 stealth on|off|status" >&2
-            exit 2
+        *) echo "Usage: $0 root hide|restore|status" >&2; exit 2 ;;
+    esac
+}
+
+cmd_tweaks() {
+    case "$1" in
+        anim)
+            case "$2" in
+                0|0.0|0.5|1|1.0)
+                    settings put global window_animation_scale "$2" 2>/dev/null || true
+                    settings put global transition_animation_scale "$2" 2>/dev/null || true
+                    settings put global animator_duration_scale "$2" 2>/dev/null || true
+                    write_state anim_scale "$2"
+                    echo "Animation scale set to ${2}x"
+                    ;;
+                *) echo "Usage: $0 tweaks anim 0|0.5|1" >&2; exit 2 ;;
+            esac
             ;;
+        swappiness)
+            case "$2" in ''|*[!0-9]*) echo "Usage: $0 tweaks swappiness <10-200>" >&2; exit 2 ;; esac
+            if [ "$2" -lt 10 ] || [ "$2" -gt 200 ]; then echo "Swappiness out of range (10-200)" >&2; exit 2; fi
+            echo "$2" > /proc/sys/vm/swappiness 2>/dev/null || true
+            write_state swappiness "$2"
+            echo "vm.swappiness set to $2"
+            ;;
+        awake)
+            case "$2" in
+                on|1) settings put global stay_on_while_plugged_in 7 2>/dev/null || true; write_state stay_awake 1; echo "Stay Awake ENABLED" ;;
+                off|0) settings put global stay_on_while_plugged_in 0 2>/dev/null || true; write_state stay_awake 0; echo "Stay Awake DISABLED" ;;
+                *) echo "Usage: $0 tweaks awake on|off" >&2; exit 2 ;;
+            esac
+            ;;
+        *) echo "Usage: $0 tweaks {anim 0|0.5|1 | swappiness <10-200> | awake on|off}" >&2; exit 2 ;;
+    esac
+}
+
+cmd_mode() {
+    case "$1" in
+        dev)
+            write_state active_mode dev
+            cmd_root restore >/dev/null 2>&1 || true
+            cmd_stealth off >/dev/null 2>&1 || true
+            cmd_tweaks anim 0.5 >/dev/null 2>&1 || true
+            cmd_tweaks swappiness 100 >/dev/null 2>&1 || true
+            echo "Switched to DEV mode (Permissive, adb root ON, 0.5x anims)"
+            ;;
+        pentest)
+            write_state active_mode pentest
+            cmd_root restore >/dev/null 2>&1 || true
+            cmd_stealth off >/dev/null 2>&1 || true
+            cmd_tweaks anim 0.5 >/dev/null 2>&1 || true
+            cmd_tweaks awake on >/dev/null 2>&1 || true
+            cmd_certs sync >/dev/null 2>&1 || true
+            cmd_frida start >/dev/null 2>&1 || true
+            cmd_ssh start >/dev/null 2>&1 || true
+            echo "Switched to PENTEST mode (Permissive, Frida + SSH started, Conscrypt CAs synced, Stay Awake ON)"
+            ;;
+        gamer)
+            write_state active_mode gamer
+            cmd_stealth on >/dev/null 2>&1 || true
+            cmd_tweaks anim 0 >/dev/null 2>&1 || true
+            cmd_tweaks swappiness 130 >/dev/null 2>&1 || true
+            cmd_tweaks awake on >/dev/null 2>&1 || true
+            echo "Switched to GAMER mode (Anti-Cheat Stealth ON, 0x anims, swappiness=130, Frida/SSH stopped)"
+            ;;
+        stealth)
+            write_state active_mode stealth
+            cmd_stealth on >/dev/null 2>&1 || true
+            cmd_tweaks anim 0.5 >/dev/null 2>&1 || true
+            cmd_tweaks swappiness 100 >/dev/null 2>&1 || true
+            echo "Switched to STEALTH mode (Enforcing, DenyList ON, debuggable=0, Frida/SSH stopped)"
+            ;;
+        *) echo "Usage: $0 mode dev|pentest|gamer|stealth" >&2; exit 2 ;;
     esac
 }
 
 cmd_proxy() {
-    sub="${1:-status}"
-    case "$sub" in
+    case "${1:-status}" in
         set)
             hp="$2"
-            if [ -z "$hp" ]; then
-                echo "Usage: $0 proxy set <host:port>" >&2
-                exit 2
-            fi
             case "$hp" in
-                *[!a-zA-Z0-9.:_-]*)
-                    echo "Invalid proxy format (expected host:port)" >&2
-                    exit 2
-                    ;;
+                ''|*[!a-zA-Z0-9.:_-]*) echo "Invalid proxy format (expected host:port)" >&2; exit 2 ;;
                 *:*) ;;
-                *)
-                    echo "Invalid proxy format (expected host:port)" >&2
-                    exit 2
-                    ;;
+                *) echo "Invalid proxy format (expected host:port)" >&2; exit 2 ;;
             esac
             settings put global http_proxy "$hp"
+            write_state http_proxy "$hp"
             echo "Global HTTP proxy set to $hp"
             ;;
         clear|off|reset)
             settings put global http_proxy :0 2>/dev/null || true
             settings delete global http_proxy 2>/dev/null || true
+            rm -f "$STATE_DIR/http_proxy" 2>/dev/null || true
             echo "Global HTTP proxy cleared"
             ;;
-        status)
-            cur="$(proxy_current)"
-            echo "proxy=${cur:-off}"
-            ;;
-        *)
-            echo "Usage: $0 proxy set <host:port>|clear|status" >&2
-            exit 2
-            ;;
+        status) cur="$(proxy_current)"; echo "proxy=${cur:-off}" ;;
+        *) echo "Usage: $0 proxy set <host:port>|clear|status" >&2; exit 2 ;;
     esac
 }
 
 cmd_display() {
-    sub="${1:-status}"
-    case "$sub" in
+    case "${1:-status}" in
         density)
             val="$2"
-            if [ "$val" = "reset" ]; then
-                wm density reset
+            if [ "$val" = "reset" ] || [ "$val" = "0" ]; then
+                wm density reset; rm -f "$STATE_DIR/dpi" 2>/dev/null || true
                 echo "Display density reset to physical default"
             else
-                case "$val" in
-                    ''|*[!0-9]*) echo "Usage: $0 display density <120-640|reset>" >&2; exit 2 ;;
-                esac
-                if [ "$val" -lt 120 ] || [ "$val" -gt 640 ]; then
-                    echo "Density out of safe range (120-640)" >&2
-                    exit 2
-                fi
-                wm density "$val"
+                case "$val" in ''|*[!0-9]*) echo "Usage: $0 display density <120-640|reset>" >&2; exit 2 ;; esac
+                if [ "$val" -lt 120 ] || [ "$val" -gt 640 ]; then echo "Density out of safe range (120-640)" >&2; exit 2; fi
+                wm density "$val"; write_state dpi "$val"
                 echo "Display density set to ${val} DPI"
             fi
             ;;
         size)
             val="$2"
             if [ "$val" = "reset" ]; then
-                wm size reset
-                echo "Display size reset to physical default"
+                wm size reset; echo "Display size reset to physical default"
             else
                 if ! printf '%s' "$val" | "$BB" grep -Eq '^[0-9]{3,4}x[0-9]{3,4}$'; then
-                    echo "Usage: $0 display size <WxH|reset> (e.g. 1080x2340)" >&2
-                    exit 2
+                    echo "Usage: $0 display size <WxH|reset>" >&2; exit 2
                 fi
-                wm size "$val"
-                echo "Display size set to $val"
+                wm size "$val"; echo "Display size set to $val"
             fi
             ;;
-        status)
-            echo "size=$(display_size_current)"
-            echo "density=$(display_density_current)"
-            ;;
-        *)
-            echo "Usage: $0 display density <dpi|reset>|size <WxH|reset>|status" >&2
-            exit 2
-            ;;
+        status) echo "size=$(display_size_current)"; echo "density=$(display_density_current)" ;;
+        *) echo "Usage: $0 display density <dpi|reset>|size <WxH|reset>|status" >&2; exit 2 ;;
     esac
 }
 
 cmd_module() {
-    sub="$1"
-    mid="$2"
-    case "$mid" in
-        ''|'*'|'.'|'..'|*/*|*[!a-zA-Z0-9._-]*)
-            echo "Invalid module ID: $mid" >&2
-            exit 2
-            ;;
-    esac
+    sub="$1"; mid="$2"
+    case "$mid" in ''|'*'|'.'|'..'|*/*|*[!a-zA-Z0-9._-]*) echo "Invalid module ID: $mid" >&2; exit 2 ;; esac
     mod_dir="/data/adb/modules/$mid"
-    if [ ! -d "$mod_dir" ]; then
-        echo "Module not found: $mid" >&2
-        exit 1
-    fi
+    [ -d "$mod_dir" ] || { echo "Module not found: $mid" >&2; exit 1; }
     case "$sub" in
-        enable)
-            rm -f "$mod_dir/disable"
-            echo "Enabled module '$mid' (reboot to apply)"
-            ;;
-        disable)
-            touch "$mod_dir/disable"
-            echo "Disabled module '$mid' (reboot to apply)"
-            ;;
-        *)
-            echo "Usage: $0 module enable|disable <module_id>" >&2
-            exit 2
-            ;;
+        enable) rm -f "$mod_dir/disable"; echo "Enabled module '$mid' (reboot to apply)" ;;
+        disable) touch "$mod_dir/disable"; echo "Disabled module '$mid' (reboot to apply)" ;;
+        *) echo "Usage: $0 module enable|disable <module_id>" >&2; exit 2 ;;
     esac
 }
 
 cmd_frida() {
-    sub="${1:-status}"
-    case "$sub" in
+    case "${1:-status}" in
         start)
             fbin="$(find_frida_bin)" || { echo "frida-server binary not bundled in this image" >&2; exit 1; }
-            if [ "$(frida_status)" = "running" ]; then
-                echo "frida-server is already running"
-                return 0
-            fi
+            [ "$(frida_status)" = "running" ] && { echo "frida-server is already running"; return 0; }
             bind="${2:-$(read_state frida_bind 0.0.0.0:27042)}"
             write_state frida_bind "$bind"
             nohup "$fbin" -l "$bind" >/dev/null 2>&1 &
-            fpid="$!"
-            printf '%s\n' "$fpid" > "$RUN_DIR/frida.pid"
-            sleep 1
+            fpid="$!"; printf '%s\n' "$fpid" > "$RUN_DIR/frida.pid"; sleep 1
             if kill -0 "$fpid" 2>/dev/null; then
                 echo "frida-server started on $bind (pid=$fpid)"
             else
-                rm -f "$RUN_DIR/frida.pid"
-                echo "frida-server failed to start" >&2
-                exit 1
+                rm -f "$RUN_DIR/frida.pid"; echo "frida-server failed to start" >&2; exit 1
             fi
             ;;
         stop)
-            if [ -f "$RUN_DIR/frida.pid" ]; then
-                kill "$(cat "$RUN_DIR/frida.pid" 2>/dev/null)" 2>/dev/null || true
-                rm -f "$RUN_DIR/frida.pid"
-            fi
+            [ -f "$RUN_DIR/frida.pid" ] && { kill "$(cat "$RUN_DIR/frida.pid" 2>/dev/null)" 2>/dev/null || true; rm -f "$RUN_DIR/frida.pid"; }
             "$BB" pkill -f frida-server 2>/dev/null || true
             echo "frida-server stopped"
             ;;
@@ -431,97 +444,55 @@ cmd_frida() {
                 *) echo "Usage: $0 frida autostart on|off" >&2; exit 2 ;;
             esac
             ;;
-        status)
-            echo "frida=$(frida_status) bind=$(read_state frida_bind 0.0.0.0:27042) autostart=$(read_state frida_autostart 0)"
+        scripts)
+            if [ -d "$ODM_ROOT/tools/frida-scripts" ]; then
+                for s in "$ODM_ROOT"/tools/frida-scripts/*.js; do
+                    [ -f "$s" ] && echo "  $s"
+                done
+            else
+                echo "(no bundled frida scripts)"
+            fi
             ;;
-        *)
-            echo "Usage: $0 frida start [ip:port]|stop|status|autostart on|off" >&2
-            exit 2
-            ;;
+        status) echo "frida=$(frida_status) bind=$(read_state frida_bind 0.0.0.0:27042) autostart=$(read_state frida_autostart 0)" ;;
+        *) echo "Usage: $0 frida start [ip:port]|stop|status|scripts|autostart on|off" >&2; exit 2 ;;
     esac
 }
 
 cmd_ssh() {
-    sub="${1:-status}"
-    case "$sub" in
+    case "${1:-status}" in
         start)
             dbdir="$(find_dropbear_dir)" || { echo "Dropbear SSH binaries not bundled in this image" >&2; exit 1; }
-            if [ "$(ssh_status)" = "running" ]; then
-                echo "Dropbear SSH is already running"
-                return 0
-            fi
-            port="${2:-$(read_state ssh_port 2222)}"
-            write_state ssh_port "$port"
+            [ "$(ssh_status)" = "running" ] && { echo "Dropbear SSH is already running"; return 0; }
+            port="${2:-$(read_state ssh_port 2222)}"; write_state ssh_port "$port"
             mkdir -p "$SSH_DIR" && chmod 0700 "$SSH_DIR" && chown 0:0 "$SSH_DIR"
-            if [ ! -f "$SSH_DIR/host_ed25519_key" ]; then
-                "$dbdir/dropbearkey" -t ed25519 -f "$SSH_DIR/host_ed25519_key" >/dev/null 2>&1 || true
-            fi
-            if [ ! -f "$SSH_DIR/host_rsa_key" ]; then
-                "$dbdir/dropbearkey" -t rsa -s 2048 -f "$SSH_DIR/host_rsa_key" >/dev/null 2>&1 || true
-            fi
+            [ -f "$SSH_DIR/host_ed25519_key" ] || "$dbdir/dropbearkey" -t ed25519 -f "$SSH_DIR/host_ed25519_key" >/dev/null 2>&1 || true
+            [ -f "$SSH_DIR/host_rsa_key" ] || "$dbdir/dropbearkey" -t rsa -s 2048 -f "$SSH_DIR/host_rsa_key" >/dev/null 2>&1 || true
             chmod 0600 "$SSH_DIR"/host_*_key 2>/dev/null || true
-            if [ ! -f "$SSH_DIR/authorized_keys" ]; then
-                : > "$SSH_DIR/authorized_keys"
-                chmod 0600 "$SSH_DIR/authorized_keys"
-                chown 0:0 "$SSH_DIR/authorized_keys"
-            fi
-            if [ ! -s "$SSH_DIR/authorized_keys" ]; then
-                echo "NOTE: $SSH_DIR/authorized_keys is empty. Add your public key with:"
-                echo "  andarium-ctl ssh addkey 'ssh-ed25519 AAAA...'"
-            fi
-            "$dbdir/dropbear" \
-                -r "$SSH_DIR/host_ed25519_key" \
-                -r "$SSH_DIR/host_rsa_key" \
-                -D "$SSH_DIR" \
-                -p "0.0.0.0:$port" \
-                -P "$RUN_DIR/dropbear.pid" \
-                -K 30 -e
+            [ -f "$SSH_DIR/authorized_keys" ] || { : > "$SSH_DIR/authorized_keys"; chmod 0600 "$SSH_DIR/authorized_keys"; chown 0:0 "$SSH_DIR/authorized_keys"; }
+            "$dbdir/dropbear" -r "$SSH_DIR/host_ed25519_key" -r "$SSH_DIR/host_rsa_key" -D "$SSH_DIR" -p "0.0.0.0:$port" -P "$RUN_DIR/dropbear.pid" -K 30 -e
             sleep 1
-            if [ "$(ssh_status)" = "running" ]; then
-                echo "Dropbear SSH started on 0.0.0.0:$port (pubkey auth via $SSH_DIR/authorized_keys)"
-            else
-                echo "Dropbear SSH failed to start" >&2
-                exit 1
-            fi
+            if [ "$(ssh_status)" = "running" ]; then echo "Dropbear SSH started on 0.0.0.0:$port"; else echo "Dropbear SSH failed to start" >&2; exit 1; fi
             ;;
         stop)
-            if [ -f "$RUN_DIR/dropbear.pid" ]; then
-                kill "$(cat "$RUN_DIR/dropbear.pid" 2>/dev/null)" 2>/dev/null || true
-                rm -f "$RUN_DIR/dropbear.pid"
-            fi
-            "$BB" pkill -x dropbear 2>/dev/null || true
-            echo "Dropbear SSH stopped"
+            [ -f "$RUN_DIR/dropbear.pid" ] && { kill "$(cat "$RUN_DIR/dropbear.pid" 2>/dev/null)" 2>/dev/null || true; rm -f "$RUN_DIR/dropbear.pid"; }
+            "$BB" pkill -x dropbear 2>/dev/null || true; echo "Dropbear SSH stopped"
             ;;
         addkey)
             key="$(printf '%s' "$2" | tr -d '\r\n')"
             if ! printf '%s' "$key" | "$BB" grep -Eq '^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|sk-ssh-ed25519@openssh\.com) [A-Za-z0-9+/=]+([[:space:]].*)?$'; then
-                echo "Invalid SSH public key format (expected ssh-ed25519/ssh-rsa/ecdsa-sha2-...)" >&2
-                exit 2
+                echo "Invalid SSH public key format" >&2; exit 2
             fi
             mkdir -p "$SSH_DIR" && chmod 0700 "$SSH_DIR" && chown 0:0 "$SSH_DIR"
             touch "$SSH_DIR/authorized_keys"
-            if ! grep -Fqx "$key" "$SSH_DIR/authorized_keys" 2>/dev/null; then
-                printf '%s\n' "$key" >> "$SSH_DIR/authorized_keys"
-            fi
+            grep -Fqx "$key" "$SSH_DIR/authorized_keys" 2>/dev/null || printf '%s\n' "$key" >> "$SSH_DIR/authorized_keys"
             chmod 0600 "$SSH_DIR/authorized_keys" && chown 0:0 "$SSH_DIR/authorized_keys"
-            echo "Added SSH public key to $SSH_DIR/authorized_keys"
+            echo "Added SSH public key"
             ;;
-        listkeys)
-            if [ -s "$SSH_DIR/authorized_keys" ]; then
-                "$BB" nl -ba "$SSH_DIR/authorized_keys"
-            else
-                echo "(no authorized keys)"
-            fi
-            ;;
+        listkeys) [ -s "$SSH_DIR/authorized_keys" ] && "$BB" nl -ba "$SSH_DIR/authorized_keys" || echo "(no authorized keys)" ;;
         delkey)
             num="$2"
-            case "$num" in
-                ''|*[!0-9]*) echo "Usage: $0 ssh delkey <line_number>" >&2; exit 2 ;;
-            esac
-            if [ ! -f "$SSH_DIR/authorized_keys" ] || [ "$num" -lt 1 ]; then
-                echo "No such key line: $num" >&2
-                exit 1
-            fi
+            case "$num" in ''|*[!0-9]*) echo "Usage: $0 ssh delkey <line_number>" >&2; exit 2 ;; esac
+            [ -f "$SSH_DIR/authorized_keys" ] && [ "$num" -ge 1 ] || { echo "No such key line: $num" >&2; exit 1; }
             "$BB" sed -i "${num}d" "$SSH_DIR/authorized_keys"
             chmod 0600 "$SSH_DIR/authorized_keys" && chown 0:0 "$SSH_DIR/authorized_keys"
             echo "Removed SSH key #$num"
@@ -537,10 +508,7 @@ cmd_ssh() {
             kcnt="$(grep -cE '^(ssh-|ecdsa-|sk-ssh-)' "$SSH_DIR/authorized_keys" 2>/dev/null || echo 0)"
             echo "ssh=$(ssh_status) port=$(read_state ssh_port 2222) autostart=$(read_state ssh_autostart 0) keys=$kcnt"
             ;;
-        *)
-            echo "Usage: $0 ssh start [port]|stop|status|addkey '<pubkey>'|listkeys|delkey <n>|autostart on|off" >&2
-            exit 2
-            ;;
+        *) echo "Usage: $0 ssh start [port]|stop|status|addkey '<pubkey>'|listkeys|delkey <n>|autostart on|off" >&2; exit 2 ;;
     esac
 }
 
@@ -549,274 +517,255 @@ ensure_hosts_mount() {
     mkdir -p "$MOD_CTRL/system/etc" 2>/dev/null
     chmod 0644 "$hosts_target" 2>/dev/null
     chcon u:object_r:system_file:s0 "$hosts_target" 2>/dev/null || true
-    if ! "$BB" grep -q ' /system/etc/hosts ' /proc/mounts 2>/dev/null; then
-        mount -o bind "$hosts_target" /system/etc/hosts 2>/dev/null || true
-    fi
+    "$BB" grep -q ' /system/etc/hosts ' /proc/mounts 2>/dev/null || mount -o bind "$hosts_target" /system/etc/hosts 2>/dev/null || true
 }
 
 cmd_adblock() {
-    sub="${1:-status}"
     hosts_target="$MOD_CTRL/system/etc/hosts"
     mkdir -p "$MOD_CTRL/system/etc" 2>/dev/null
-    case "$sub" in
+    case "${1:-status}" in
         on|1)
-            if [ -f "$STATE_DIR/hosts.adblock" ]; then
-                cp -f "$STATE_DIR/hosts.adblock" "$hosts_target"
-            elif [ -f "$ODM_ROOT/config/hosts.adblock" ]; then
-                cp -f "$ODM_ROOT/config/hosts.adblock" "$hosts_target"
-            else
-                echo "Bundled hosts.adblock not found; run 'andarium-ctl adblock update' first" >&2
-                exit 1
-            fi
-            if [ -f "$ODM_ROOT/custom/hosts" ]; then
-                printf '\n# === Custom Hosts ===\n' >> "$hosts_target"
-                cat "$ODM_ROOT/custom/hosts" >> "$hosts_target"
-            fi
-            write_state adblock on
-            ensure_hosts_mount
+            if [ -f "$STATE_DIR/hosts.adblock" ]; then cp -f "$STATE_DIR/hosts.adblock" "$hosts_target"
+            elif [ -f "$ODM_ROOT/config/hosts.adblock" ]; then cp -f "$ODM_ROOT/config/hosts.adblock" "$hosts_target"
+            else echo "Bundled hosts.adblock not found" >&2; exit 1; fi
+            [ -f "$ODM_ROOT/custom/hosts" ] && { printf '\n# === Custom Hosts ===\n' >> "$hosts_target"; cat "$ODM_ROOT/custom/hosts" >> "$hosts_target"; }
+            write_state adblock on; ensure_hosts_mount
             echo "Systemless ad-block ENABLED ($(wc -l < "$hosts_target") lines)"
             ;;
         off|0)
             printf '127.0.0.1       localhost\n::1             ip6-localhost\n' > "$hosts_target"
-            if [ -f "$ODM_ROOT/custom/hosts" ]; then
-                printf '\n# === Custom Hosts ===\n' >> "$hosts_target"
-                cat "$ODM_ROOT/custom/hosts" >> "$hosts_target"
-            fi
-            write_state adblock off
-            ensure_hosts_mount
-            echo "Systemless ad-block DISABLED (clean localhost hosts restored)"
+            [ -f "$ODM_ROOT/custom/hosts" ] && { printf '\n# === Custom Hosts ===\n' >> "$hosts_target"; cat "$ODM_ROOT/custom/hosts" >> "$hosts_target"; }
+            write_state adblock off; ensure_hosts_mount
+            echo "Systemless ad-block DISABLED"
             ;;
         update)
             tmp_hosts="$STATE_DIR/hosts.adblock.tmp"
             url="https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
-            echo "Downloading latest StevenBlack unified hosts..."
             if "$BB" wget -qO "$tmp_hosts" "$url" 2>/dev/null || curl -fsSL "$url" -o "$tmp_hosts" 2>/dev/null; then
                 if [ "$(wc -l < "$tmp_hosts" 2>/dev/null || echo 0)" -gt 10000 ] && grep -q '127.0.0.1' "$tmp_hosts"; then
-                    mv -f "$tmp_hosts" "$STATE_DIR/hosts.adblock"
-                    cmd_adblock on
-                else
-                    rm -f "$tmp_hosts"
-                    echo "Downloaded hosts file failed sanity check" >&2
-                    exit 1
-                fi
-            else
-                rm -f "$tmp_hosts"
-                echo "Failed to download hosts update (check internet connectivity)" >&2
-                exit 1
-            fi
+                    mv -f "$tmp_hosts" "$STATE_DIR/hosts.adblock"; cmd_adblock on
+                else rm -f "$tmp_hosts"; echo "Downloaded hosts failed sanity check" >&2; exit 1; fi
+            else rm -f "$tmp_hosts"; echo "Failed to download hosts update" >&2; exit 1; fi
             ;;
-        status)
-            lines="$(wc -l < "$hosts_target" 2>/dev/null || echo 0)"
-            echo "adblock=$(adblock_status) lines=$lines"
-            ;;
-        *)
-            echo "Usage: $0 adblock on|off|update|status" >&2
-            exit 2
-            ;;
+        status) echo "adblock=$(adblock_status) lines=$(wc -l < "$hosts_target" 2>/dev/null || echo 0)" ;;
+        *) echo "Usage: $0 adblock on|off|update|status" >&2; exit 2 ;;
     esac
 }
 
 cmd_certs() {
-    sub="${1:-status}"
-    case "$sub" in
+    case "${1:-status}" in
         sync)
             conscrypt_dir="/apex/com.android.conscrypt/cacerts"
             stock_backup="$STATE_DIR/certs-stock"
             work_certs="$RUN_DIR/cacerts_stage"
-
-            if [ ! -d "$conscrypt_dir" ]; then
-                echo "Conscrypt cacerts directory not present: $conscrypt_dir" >&2
-                exit 1
-            fi
-
+            [ -d "$conscrypt_dir" ] || { echo "Conscrypt dir missing" >&2; exit 1; }
             if [ ! -d "$stock_backup" ] && ! "$BB" grep -q "$conscrypt_dir" /proc/mounts 2>/dev/null; then
-                mkdir -p "$stock_backup"
-                "$BB" cp -af "$conscrypt_dir/." "$stock_backup/" 2>/dev/null || true
+                mkdir -p "$stock_backup"; "$BB" cp -af "$conscrypt_dir/." "$stock_backup/" 2>/dev/null || true
             fi
-
             extra="$(certs_count_extra)"
-            if [ "$extra" -eq 0 ] 2>/dev/null; then
-                echo "No user or custom CA certificates to inject (0 extra certs)"
-                return 0
-            fi
-
-            rm -rf "$work_certs"
-            mkdir -p "$work_certs"
-            if [ -d "$stock_backup" ]; then
-                "$BB" cp -af "$stock_backup/." "$work_certs/" 2>/dev/null || true
-            else
-                "$BB" cp -af "$conscrypt_dir/." "$work_certs/" 2>/dev/null || true
-            fi
-            if [ -d "$ODM_ROOT/custom/certs" ]; then
-                "$BB" cp -f "$ODM_ROOT/custom/certs/"* "$work_certs/" 2>/dev/null || true
-            fi
-            if [ -d /data/misc/user/0/cacerts-added ]; then
-                "$BB" cp -f /data/misc/user/0/cacerts-added/* "$work_certs/" 2>/dev/null || true
-            fi
-
-            if ! "$BB" grep -q "$conscrypt_dir" /proc/mounts 2>/dev/null; then
-                mount -t tmpfs tmpfs "$conscrypt_dir"
-            fi
+            [ "$extra" -eq 0 ] 2>/dev/null && { echo "No user or custom CA certs to inject (0 extra)"; return 0; }
+            rm -rf "$work_certs"; mkdir -p "$work_certs"
+            if [ -d "$stock_backup" ]; then "$BB" cp -af "$stock_backup/." "$work_certs/" 2>/dev/null || true
+            else "$BB" cp -af "$conscrypt_dir/." "$work_certs/" 2>/dev/null || true; fi
+            [ -d "$ODM_ROOT/custom/certs" ] && "$BB" cp -f "$ODM_ROOT/custom/certs/"* "$work_certs/" 2>/dev/null || true
+            [ -d /data/misc/user/0/cacerts-added ] && "$BB" cp -f /data/misc/user/0/cacerts-added/* "$work_certs/" 2>/dev/null || true
+            "$BB" grep -q "$conscrypt_dir" /proc/mounts 2>/dev/null || mount -t tmpfs tmpfs "$conscrypt_dir"
             rm -f "$conscrypt_dir"/* 2>/dev/null || true
             "$BB" cp -f "$work_certs"/* "$conscrypt_dir/" 2>/dev/null || true
-            chown -R 0:0 "$conscrypt_dir" 2>/dev/null
-            chmod 0755 "$conscrypt_dir" 2>/dev/null
-            chmod 0644 "$conscrypt_dir"/* 2>/dev/null
+            chown -R 0:0 "$conscrypt_dir" 2>/dev/null; chmod 0755 "$conscrypt_dir" 2>/dev/null; chmod 0644 "$conscrypt_dir"/* 2>/dev/null
             chcon -R u:object_r:system_file:s0 "$conscrypt_dir" 2>/dev/null || true
-
-            zygote_pids="$("$BB" pidof zygote64 zygote 2>/dev/null || true)"
-            for zpid in $zygote_pids; do
+            for zpid in $("$BB" pidof zygote64 zygote 2>/dev/null || true); do
                 "$BB" nsenter --mount="/proc/$zpid/ns/mnt" -- mount --bind "$conscrypt_dir" "$conscrypt_dir" 2>/dev/null || true
                 for cpid in $(cat "/proc/$zpid/task/"*/children 2>/dev/null || true); do
                     "$BB" nsenter --mount="/proc/$cpid/ns/mnt" -- mount --bind "$conscrypt_dir" "$conscrypt_dir" 2>/dev/null || true
                 done
             done
-
             rm -rf "$work_certs"
-            total="$(ls -1 "$conscrypt_dir" 2>/dev/null | wc -l)"
-            echo "Injected $extra extra CA cert(s) into $conscrypt_dir (total=$total)"
+            echo "Injected $extra extra CA cert(s) into $conscrypt_dir (total=$(ls -1 "$conscrypt_dir" 2>/dev/null | wc -l))"
             ;;
-        status)
-            total="$(ls -1 /apex/com.android.conscrypt/cacerts 2>/dev/null | wc -l)"
-            echo "certs=$(certs_status) extra=$(certs_count_extra) total=$total"
-            ;;
-        *)
-            echo "Usage: $0 certs sync|status" >&2
-            exit 2
-            ;;
+        status) echo "certs=$(certs_status) extra=$(certs_count_extra) total=$(ls -1 /apex/com.android.conscrypt/cacerts 2>/dev/null | wc -l)" ;;
+        *) echo "Usage: $0 certs sync|status" >&2; exit 2 ;;
     esac
 }
 
 cmd_shizuku() {
-    sub="${1:-status}"
-    case "$sub" in
+    case "${1:-status}" in
         start)
-            if [ "$(shizuku_status)" = "running" ]; then
-                echo "Shizuku server is already running"
-                return 0
-            fi
+            [ "$(shizuku_status)" = "running" ] && { echo "Shizuku server is already running"; return 0; }
             apk_line="$(pm path moe.shizuku.privileged.api 2>/dev/null | head -n1)"
             apk_path="${apk_line#package:}"
-            if [ -z "$apk_path" ] || [ ! -f "$apk_path" ]; then
-                echo "Shizuku package is not installed yet" >&2
-                exit 1
-            fi
+            [ -n "$apk_path" ] && [ -f "$apk_path" ] || { echo "Shizuku package not installed" >&2; exit 1; }
             app_dir="$(dirname "$apk_path")"
             starter="$app_dir/lib/arm64/libshizuku.so"
             [ -x "$starter" ] || starter="$app_dir/lib/arm/libshizuku.so"
-            if [ ! -x "$starter" ]; then
-                echo "Shizuku native starter not found in $app_dir/lib" >&2
-                exit 1
-            fi
+            [ -x "$starter" ] || { echo "Shizuku starter missing" >&2; exit 1; }
             "$starter" >/dev/null 2>&1 &
             sleep 2
             echo "Shizuku start requested (status=$(shizuku_status))"
             ;;
-        status)
-            echo "shizuku=$(shizuku_status)"
-            ;;
-        *)
-            echo "Usage: $0 shizuku start|status" >&2
-            exit 2
-            ;;
-    esac
-}
-
-ensure_webui_token() {
-    if [ ! -s "$RUN_DIR/webui.token" ]; then
-        "$BB" hexdump -n 16 -e '16/1 "%02x"' /dev/urandom > "$RUN_DIR/webui.token"
-        chmod 0600 "$RUN_DIR/webui.token"
-        chown 0:0 "$RUN_DIR/webui.token"
-    fi
-    cat "$RUN_DIR/webui.token"
-}
-
-cmd_webui() {
-    sub="${1:-status}"
-    webroot="$MOD_CTRL/webroot"
-    case "$sub" in
-        start)
-            if [ ! -d "$webroot" ]; then
-                echo "Control Panel webroot not found: $webroot" >&2
-                exit 1
-            fi
-            tok="$(ensure_webui_token)"
-            if [ "$(webui_status)" = "running" ]; then
-                echo "Control Panel running at http://127.0.0.1:8787/?token=$tok"
-                return 0
-            fi
-            chmod 0755 "$webroot/cgi-bin/api" 2>/dev/null || true
-            "$BB" httpd -f -p 127.0.0.1:8787 -h "$webroot" >/dev/null 2>&1 &
-            hpid="$!"
-            printf '%s\n' "$hpid" > "$RUN_DIR/httpd.pid"
-            sleep 1
-            if kill -0 "$hpid" 2>/dev/null; then
-                echo "Control Panel started at http://127.0.0.1:8787/?token=$tok"
-            else
-                rm -f "$RUN_DIR/httpd.pid"
-                echo "Control Panel failed to start" >&2
-                exit 1
-            fi
-            ;;
-        stop)
-            if [ -f "$RUN_DIR/httpd.pid" ]; then
-                kill "$(cat "$RUN_DIR/httpd.pid" 2>/dev/null)" 2>/dev/null || true
-                rm -f "$RUN_DIR/httpd.pid"
-            fi
-            echo "Control Panel stopped"
-            ;;
-        open)
-            cmd_webui start >/dev/null
-            tok="$(ensure_webui_token)"
-            url="http://127.0.0.1:8787/?token=$tok"
-            am start --user 0 -a android.intent.action.VIEW -d "$url" >/dev/null 2>&1 || true
-            echo "Opened $url"
-            ;;
-        status)
-            if [ "$(webui_status)" = "running" ]; then
-                echo "webui=running url=http://127.0.0.1:8787/?token=$(ensure_webui_token)"
-            else
-                echo "webui=stopped"
-            fi
-            ;;
-        *)
-            echo "Usage: $0 webui start|stop|open|status" >&2
-            exit 2
-            ;;
+        status) echo "shizuku=$(shizuku_status)" ;;
+        *) echo "Usage: $0 shizuku start|status" >&2; exit 2 ;;
     esac
 }
 
 cmd_grant() {
     pkg="$1"
-    if [ -z "$pkg" ]; then
-        echo "Usage: $0 grant <package_name>" >&2
-        exit 2
-    fi
-    uid="$("$BB" stat -c %u "/data/data/$pkg" 2>/dev/null || true)"
-    if [ -z "$uid" ] || [ "$uid" = "0" ]; then
-        uid="$(dumpsys package "$pkg" 2>/dev/null | "$BB" grep -m1 -E 'appId=|userId=' | "$BB" sed -E 's/.*(appId|userId)=([0-9]+).*/\2/' || true)"
-    fi
-    case "$uid" in
-        ''|*[!0-9]*)
-            echo "Could not find installed package: $pkg" >&2
-            exit 1
-            ;;
-    esac
+    [ -n "$pkg" ] || { echo "Usage: $0 grant <package_name>" >&2; exit 2; }
+    uid="$(resolve_pkg_uid "$pkg")" || { echo "Package not found: $pkg" >&2; exit 1; }
     "$MAGISK" --sqlite "INSERT OR REPLACE INTO policies (uid,policy,until,logging,notification) VALUES ($uid,2,0,1,0);"
     echo "Granted permanent Magisk root to $pkg (uid=$uid)"
 }
 
+cmd_revoke() {
+    pkg="$1"
+    [ -n "$pkg" ] || { echo "Usage: $0 revoke <package_name>" >&2; exit 2; }
+    uid="$(resolve_pkg_uid "$pkg")" || { echo "Package not found: $pkg" >&2; exit 1; }
+    "$MAGISK" --sqlite "DELETE FROM policies WHERE uid=$uid;"
+    echo "Revoked Magisk root from $pkg (uid=$uid)"
+}
+
+cmd_denylist() {
+    sub="$1"; pkg="$2"
+    case "$pkg" in ''|*[!a-zA-Z0-9._]*) echo "Invalid package name: $pkg" >&2; exit 2 ;; esac
+    case "$sub" in
+        add) "$MAGISK" --denylist add "$pkg" 2>&1 || true; echo "Added $pkg to Magisk DenyList" ;;
+        rm|remove) "$MAGISK" --denylist rm "$pkg" 2>&1 || true; echo "Removed $pkg from Magisk DenyList" ;;
+        *) echo "Usage: $0 denylist add|rm <package_name>" >&2; exit 2 ;;
+    esac
+}
+
+cmd_apps_json() {
+    granted_uids="$("$MAGISK" --sqlite "SELECT uid FROM policies WHERE policy=2;" 2>/dev/null | "$BB" sed 's/uid=//g' | "$BB" tr '\n' ' ')"
+    dl_pkgs="$("$MAGISK" --denylist ls 2>/dev/null | cut -d'|' -f1 | "$BB" sort -u | "$BB" tr '\n' ' ')"
+    out=""
+    pm list packages -3 -U 2>/dev/null | "$BB" sort | (
+        while IFS= read -r line; do
+            case "$line" in
+                package:*) ;;
+                *) continue ;;
+            esac
+            pkg="$(printf '%s' "$line" | "$BB" sed -E 's/^package:([^ ]+).*/\1/')"
+            uid="$(printf '%s' "$line" | "$BB" sed -nE 's/.*uid:([0-9]+).*/\1/p')"
+            [ -n "$uid" ] || uid="$(resolve_pkg_uid "$pkg" 2>/dev/null || echo 0)"
+            has_su="false"
+            case " $granted_uids " in *" $uid "*) [ "$uid" != "0" ] && has_su="true" ;; esac
+            in_dl="false"
+            case " $dl_pkgs " in *" $pkg "*) in_dl="true" ;; esac
+            item="{\"pkg\":\"$(json_escape "$pkg")\",\"uid\":$uid,\"su\":$has_su,\"denylist\":$in_dl}"
+            if [ -n "$out" ]; then out="$out,$item"; else out="$item"; fi
+        done
+        printf '{"apps":[%s]}\n' "$out"
+    )
+}
+
+cmd_bundled_json() {
+    installed_pkgs="$(pm list packages 2>/dev/null | "$BB" sed 's/^package://' | "$BB" tr '\n' ' ')"
+    out=""
+    for entry in \
+        "01-magisk.apk|com.topjohnwu.magisk|Magisk Manager" \
+        "02-termux.apk|com.termux|Termux" \
+        "03-material-files.apk|me.zhanghai.android.files|Material Files" \
+        "04-microg-gms.apk|com.google.android.gms|microG GmsCore" \
+        "05-microg-vending.apk|com.android.vending|microG Companion" \
+        "06-aurora-store.apk|com.aurora.store|Aurora Store" \
+        "07-obtainium.apk|dev.imranr.obtainium|Obtainium" \
+        "08-app-manager.apk|io.github.muntashirakon.AppManager|App Manager" \
+        "09-shizuku.apk|moe.shizuku.privileged.api|Shizuku" \
+        "10-neo-backup.apk|com.machiav3lli.backup|Neo Backup" \
+        "11-trustmealready.apk|com.virb3.trustmealready|TrustMeAlready (SSL)" \
+        "12-disable-flag-secure.apk|io.github.lsposed.disableflagsecure|Disable FLAG_SECURE" \
+        "13-gps-setter.apk|com.android1500.gpssetter|GPS Setter"
+    do
+        file="${entry%%|*}"
+        rest="${entry#*|}"
+        pkg="${rest%%|*}"
+        label="${rest#*|}"
+        [ -f "$ODM_ROOT/apks/$file" ] || continue
+        inst="false"
+        case " $installed_pkgs " in *" $pkg "*) inst="true" ;; esac
+        item="{\"file\":\"$file\",\"pkg\":\"$pkg\",\"label\":\"$label\",\"installed\":$inst}"
+        if [ -n "$out" ]; then out="$out,$item"; else out="$item"; fi
+    done
+    printf '{"bundled":[%s]}\n' "$out"
+}
+
+cmd_bundled_install() {
+    fname="$1"
+    case "$fname" in ''|*/*|..*|*[!a-zA-Z0-9._-]*) echo "Invalid APK filename" >&2; exit 2 ;; esac
+    src="$ODM_ROOT/apks/$fname"
+    [ -f "$src" ] || { echo "Bundled APK not found: $fname" >&2; exit 1; }
+    stage="/data/local/tmp/_andarium_manual.apk"
+    cp -f "$src" "$stage" && chmod 0644 "$stage" && chown 2000:2000 "$stage" 2>/dev/null || true
+    pm install --user 0 -r -g "$stage" 2>&1 || pm install -r -g "$stage" 2>&1
+    rc=$?
+    rm -f "$stage"
+    exit $rc
+}
+
+cmd_bundled_uninstall() {
+    pkg="$1"
+    case "$pkg" in ''|*[!a-zA-Z0-9._]*) echo "Invalid package name" >&2; exit 2 ;; esac
+    pm uninstall --user 0 "$pkg" 2>&1 || pm uninstall "$pkg" 2>&1
+}
+
+cmd_backup_export() {
+    ak_b64=""
+    [ -s "$SSH_DIR/authorized_keys" ] && ak_b64="$("$BB" base64 "$SSH_DIR/authorized_keys" | "$BB" tr -d '\n')"
+    dl_list="$("$MAGISK" --denylist ls 2>/dev/null | cut -d'|' -f1 | "$BB" sort -u | "$BB" tr '\n' ',' | "$BB" sed 's/,$//')"
+    printf '{"version":4,"selinux":"%s","stealth":"%s","adbroot":"%s","debuggable":"%s","adblock":"%s","frida_autostart":"%s","ssh_autostart":"%s","ssh_port":"%s","anim_scale":"%s","swappiness":"%s","stay_awake":"%s","proxy":"%s","denylist":"%s","authorized_keys_b64":"%s"}\n' \
+        "$(read_state selinux_mode permissive)" "$(read_state stealth_mode off)" \
+        "$(read_state adbroot 1)" "$(read_state debuggable 1)" "$(adblock_status)" \
+        "$(read_state frida_autostart 0)" "$(read_state ssh_autostart 0)" "$(read_state ssh_port 2222)" \
+        "$(anim_current)" "$(swappiness_current)" "$(awake_current)" \
+        "$(json_escape "$(proxy_current)")" "$(json_escape "$dl_list")" "$ak_b64"
+}
+
+ensure_webui_token() {
+    if [ ! -s "$RUN_DIR/webui.token" ]; then
+        "$BB" hexdump -n 16 -e '16/1 "%02x"' /dev/urandom > "$RUN_DIR/webui.token"
+        chmod 0600 "$RUN_DIR/webui.token"; chown 0:0 "$RUN_DIR/webui.token"
+    fi
+    cat "$RUN_DIR/webui.token"
+}
+
+cmd_webui() {
+    webroot="$MOD_CTRL/webroot"
+    case "${1:-status}" in
+        start)
+            [ -d "$webroot" ] || { echo "Control Panel webroot not found" >&2; exit 1; }
+            tok="$(ensure_webui_token)"
+            [ "$(webui_status)" = "running" ] && { echo "Control Panel running at http://127.0.0.1:8787/?token=$tok"; return 0; }
+            chmod 0755 "$webroot/cgi-bin/api" 2>/dev/null || true
+            "$BB" httpd -f -p 127.0.0.1:8787 -h "$webroot" >/dev/null 2>&1 &
+            hpid="$!"; printf '%s\n' "$hpid" > "$RUN_DIR/httpd.pid"; sleep 1
+            if kill -0 "$hpid" 2>/dev/null; then echo "Control Panel started at http://127.0.0.1:8787/?token=$tok"
+            else rm -f "$RUN_DIR/httpd.pid"; echo "Control Panel failed to start" >&2; exit 1; fi
+            ;;
+        stop) [ -f "$RUN_DIR/httpd.pid" ] && { kill "$(cat "$RUN_DIR/httpd.pid" 2>/dev/null)" 2>/dev/null || true; rm -f "$RUN_DIR/httpd.pid"; }; echo "Control Panel stopped" ;;
+        open)
+            cmd_webui start >/dev/null; tok="$(ensure_webui_token)"
+            url="http://127.0.0.1:8787/?token=$tok"
+            am start --user 0 -a android.intent.action.VIEW -d "$url" >/dev/null 2>&1 || true
+            echo "Opened $url"
+            ;;
+        status) [ "$(webui_status)" = "running" ] && echo "webui=running url=http://127.0.0.1:8787/?token=$(ensure_webui_token)" || echo "webui=stopped" ;;
+        *) echo "Usage: $0 webui start|stop|open|status" >&2; exit 2 ;;
+    esac
+}
+
 cmd_status() {
-    echo "=== Andarium Root Status (v3) ==="
+    echo "=== Andarium Root Status (v4) ==="
     echo "Kernel:       $(uname -r)"
     echo "Android:      $(getprop ro.build.version.release) (SDK $(getprop ro.build.version.sdk))"
-    echo "Magisk:       $("$MAGISK" -v 2>/dev/null || echo 'not found')"
+    echo "Magisk:       $("$MAGISK" -v 2>/dev/null || echo 'not found') (su: $(root_su_status))"
+    echo "Active Mode:  $(read_state active_mode default) (preboot preset: $(getprop ro.boot.ar.preset 2>/dev/null || echo default))"
     echo "SELinux:      $(getenforce 2>/dev/null || cat /sys/fs/selinux/enforce 2>/dev/null) (saved: $(read_state selinux_mode default))"
     echo "Stealth Mode: $(read_state stealth_mode off)"
     echo "Debuggable:   ro.debuggable=$(getprop ro.debuggable) (saved: $(read_state debuggable default))"
     echo "ADB Root:     /data/adbroot/enabled=$(cat /data/adbroot/enabled 2>/dev/null || echo unset) service.adb.root=$(getprop service.adb.root)"
     echo "HTTP Proxy:   $(proxy_current || echo off)"
     echo "Display:      $(display_size_current) @ $(display_density_current)"
+    echo "Tweaks:       anim=$(anim_current)x swappiness=$(swappiness_current) awake=$(awake_current)"
     echo "Ad-Block:     $(adblock_status)"
     echo "CA Certs:     $(certs_status) (extra: $(certs_count_extra))"
     echo "Frida Server: $(frida_status) (bind: $(read_state frida_bind 0.0.0.0:27042), autostart: $(read_state frida_autostart 0))"
@@ -826,13 +775,9 @@ cmd_status() {
     echo "Modules:"
     for mod in /data/adb/modules/*; do
         [ -d "$mod" ] || continue
-        name="$(basename "$mod")"
-        state="enabled"
-        [ -f "$mod/disable" ] && state="disabled"
+        name="$(basename "$mod")"; state="enabled"; [ -f "$mod/disable" ] && state="disabled"
         echo "  - $name ($state)"
     done
-    echo "Granted UIDs:"
-    "$MAGISK" --sqlite "SELECT uid, policy FROM policies;" 2>/dev/null | "$BB" sed 's/^/  /'
 }
 
 cmd_status_json() {
@@ -840,42 +785,39 @@ cmd_status_json() {
     android_rel="$(json_escape "$(getprop ro.build.version.release)")"
     android_sdk="$(json_escape "$(getprop ro.build.version.sdk)")"
     magisk_ver="$(json_escape "$("$MAGISK" -v 2>/dev/null || echo 'not found')")"
+    root_su="$(root_su_status)"
+    active_mode="$(json_escape "$(read_state active_mode dev)")"
+    preboot_preset="$(json_escape "$(getprop ro.boot.ar.preset 2>/dev/null || echo default)")"
     selinux_live="$(json_escape "$(getenforce 2>/dev/null || cat /sys/fs/selinux/enforce 2>/dev/null)")"
     stealth="$(read_state stealth_mode off)"
     debuggable="$(json_escape "$(getprop ro.debuggable)")"
-    adbroot_enabled="$(cat /data/adbroot/enabled 2>/dev/null | tr -d '\r\n ')"
-    [ -n "$adbroot_enabled" ] || adbroot_enabled="0"
+    adbroot_enabled="$(cat /data/adbroot/enabled 2>/dev/null | tr -d '\r\n ')"; [ -n "$adbroot_enabled" ] || adbroot_enabled="0"
     proxy_val="$(json_escape "$(proxy_current)")"
     disp_size="$(json_escape "$(display_size_current)")"
     disp_density="$(json_escape "$(display_density_current)")"
+    anim_val="$(json_escape "$(anim_current)")"
+    swap_val="$(swappiness_current)"
+    awake_val="$(awake_current)"
     adblock="$(adblock_status)"
-    certs="$(certs_status)"
-    certs_extra="$(certs_count_extra)"
-    frida="$(frida_status)"
-    frida_auto="$(read_state frida_autostart 0)"
-    frida_bind="$(json_escape "$(read_state frida_bind 0.0.0.0:27042)")"
-    ssh_st="$(ssh_status)"
-    ssh_auto="$(read_state ssh_autostart 0)"
-    ssh_port="$(read_state ssh_port 2222)"
+    certs="$(certs_status)"; certs_extra="$(certs_count_extra)"
+    frida="$(frida_status)"; frida_auto="$(read_state frida_autostart 0)"; frida_bind="$(json_escape "$(read_state frida_bind 0.0.0.0:27042)")"
+    ssh_st="$(ssh_status)"; ssh_auto="$(read_state ssh_autostart 0)"; ssh_port="$(read_state ssh_port 2222)"
     ssh_keys="$(grep -cE '^(ssh-|ecdsa-|sk-ssh-)' "$SSH_DIR/authorized_keys" 2>/dev/null || echo 0)"
-    shizuku="$(shizuku_status)"
-    webui="$(webui_status)"
+    shizuku="$(shizuku_status)"; webui="$(webui_status)"
     uptime_s="$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)"
     mem_avail="$("$BB" awk '/MemAvailable:/{printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0)"
     mem_total="$("$BB" awk '/MemTotal:/{printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0)"
 
-    # Build SSH keys preview array
     keys_json=""
     if [ -s "$SSH_DIR/authorized_keys" ]; then
         kidx=0
         while IFS= read -r kline || [ -n "$kline" ]; do
-            kidx=$((kidx + 1))
-            [ -n "$kline" ] || continue
+            kidx=$((kidx + 1)); [ -n "$kline" ] || continue
             ktype="$(printf '%s' "$kline" | "$BB" awk '{print $1}')"
             kcomment="$(printf '%s' "$kline" | "$BB" awk '{print $3}')"
             kshort="$(printf '%s' "$kline" | "$BB" awk '{print substr($2,1,18)"..."}')"
             kitem="{\"index\":$kidx,\"type\":\"$(json_escape "$ktype")\",\"preview\":\"$(json_escape "$kshort")\",\"comment\":\"$(json_escape "$kcomment")\"}"
-            if [ -n "$keys_json" ]; then keys_json="$keys_json,$kitem"; else keys_json="$kitem"; fi
+            [ -n "$keys_json" ] && keys_json="$keys_json,$kitem" || keys_json="$kitem"
         done < "$SSH_DIR/authorized_keys"
     fi
 
@@ -883,19 +825,17 @@ cmd_status_json() {
     for mod in /data/adb/modules/*; do
         [ -d "$mod" ] || continue
         mid="$(basename "$mod")"
-        mname="$(grep -m1 '^name=' "$mod/module.prop" 2>/dev/null | cut -d= -f2-)"
-        [ -n "$mname" ] || mname="$mid"
+        mname="$(grep -m1 '^name=' "$mod/module.prop" 2>/dev/null | cut -d= -f2-)"; [ -n "$mname" ] || mname="$mid"
         mver="$(grep -m1 '^version=' "$mod/module.prop" 2>/dev/null | cut -d= -f2-)"
-        menabled="true"
-        [ -f "$mod/disable" ] && menabled="false"
+        menabled="true"; [ -f "$mod/disable" ] && menabled="false"
         item="{\"id\":\"$(json_escape "$mid")\",\"name\":\"$(json_escape "$mname")\",\"version\":\"$(json_escape "$mver")\",\"enabled\":$menabled}"
-        if [ -n "$mods_json" ]; then mods_json="$mods_json,$item"; else mods_json="$item"; fi
+        [ -n "$mods_json" ] && mods_json="$mods_json,$item" || mods_json="$item"
     done
 
-    printf '{"kernel":"%s","android":"%s","sdk":"%s","magisk":"%s","selinux":"%s","stealth":"%s","debuggable":"%s","adbroot":"%s","proxy":"%s","display_size":"%s","display_density":"%s","adblock":"%s","certs":"%s","certs_extra":%s,"frida":"%s","frida_autostart":"%s","frida_bind":"%s","ssh":"%s","ssh_autostart":"%s","ssh_port":"%s","ssh_keys":%s,"ssh_key_list":[%s],"shizuku":"%s","webui":"%s","uptime_sec":%s,"mem_avail_mb":%s,"mem_total_mb":%s,"modules":[%s]}\n' \
-        "$kernel" "$android_rel" "$android_sdk" "$magisk_ver" "$selinux_live" "$stealth" \
-        "$debuggable" "$adbroot_enabled" "$proxy_val" "$disp_size" "$disp_density" \
-        "$adblock" "$certs" "$certs_extra" \
+    printf '{"kernel":"%s","android":"%s","sdk":"%s","magisk":"%s","root_su":"%s","active_mode":"%s","preboot_preset":"%s","selinux":"%s","stealth":"%s","debuggable":"%s","adbroot":"%s","proxy":"%s","display_size":"%s","display_density":"%s","anim_scale":"%s","swappiness":%s,"stay_awake":"%s","adblock":"%s","certs":"%s","certs_extra":%s,"frida":"%s","frida_autostart":"%s","frida_bind":"%s","ssh":"%s","ssh_autostart":"%s","ssh_port":"%s","ssh_keys":%s,"ssh_key_list":[%s],"shizuku":"%s","webui":"%s","uptime_sec":%s,"mem_avail_mb":%s,"mem_total_mb":%s,"modules":[%s]}\n' \
+        "$kernel" "$android_rel" "$android_sdk" "$magisk_ver" "$root_su" "$active_mode" "$preboot_preset" \
+        "$selinux_live" "$stealth" "$debuggable" "$adbroot_enabled" "$proxy_val" "$disp_size" "$disp_density" \
+        "$anim_val" "$swap_val" "$awake_val" "$adblock" "$certs" "$certs_extra" \
         "$frida" "$frida_auto" "$frida_bind" "$ssh_st" "$ssh_auto" "$ssh_port" "$ssh_keys" "$keys_json" \
         "$shizuku" "$webui" "$uptime_s" "$mem_avail" "$mem_total" "$mods_json"
 }
@@ -903,6 +843,14 @@ cmd_status_json() {
 case "${1:-status}" in
     status) cmd_status ;;
     status-json) cmd_status_json ;;
+    apps-json) cmd_apps_json ;;
+    bundled-json) cmd_bundled_json ;;
+    bundled-install) cmd_bundled_install "$2" ;;
+    bundled-uninstall) cmd_bundled_uninstall "$2" ;;
+    backup-export) cmd_backup_export ;;
+    mode) cmd_mode "$2" ;;
+    root) cmd_root "$2" ;;
+    tweaks) shift; cmd_tweaks "$@" ;;
     selinux) cmd_selinux "$2" ;;
     adbroot) cmd_adbroot "$2" ;;
     debuggable) cmd_debuggable "$2" ;;
@@ -910,6 +858,7 @@ case "${1:-status}" in
     proxy) shift; cmd_proxy "$@" ;;
     display) shift; cmd_display "$@" ;;
     module) shift; cmd_module "$@" ;;
+    denylist) shift; cmd_denylist "$@" ;;
     frida) shift; cmd_frida "$@" ;;
     ssh) shift; cmd_ssh "$@" ;;
     adblock) shift; cmd_adblock "$@" ;;
@@ -917,32 +866,24 @@ case "${1:-status}" in
     shizuku) shift; cmd_shizuku "$@" ;;
     webui) shift; cmd_webui "$@" ;;
     pif-update)
-        if [ -f /data/adb/modules/playintegrityfix/action.sh ]; then
-            sh /data/adb/modules/playintegrityfix/action.sh
-        else
-            echo "PlayIntegrityFork module is not installed" >&2
-            exit 1
-        fi
+        [ -f /data/adb/modules/playintegrityfix/action.sh ] && sh /data/adb/modules/playintegrityfix/action.sh || { echo "PlayIntegrityFork not installed" >&2; exit 1; }
         ;;
     grant) cmd_grant "$2" ;;
+    revoke) cmd_revoke "$2" ;;
     logs)
         lines="${2:-120}"
-        if [ -f "$LOG_FILE" ]; then
-            "$BB" tail -n "$lines" "$LOG_FILE"
-        else
-            echo "(no log file yet)"
-        fi
+        [ -f "$LOG_FILE" ] && "$BB" tail -n "$lines" "$LOG_FILE" || echo "(no log file yet)"
         ;;
     reboot)
         echo "Rebooting Android guest..."
         (sleep 1; svc power reboot 2>/dev/null || reboot 2>/dev/null) &
         ;;
     reprovision)
-        rm -f "$STATE_DIR/.apps_provisioned_v2" "$STATE_DIR/.apps_provisioned_v1"
-        sh "$ODM_ROOT/scripts/andarium_boot_complete.sh" "$(dirname "$MAGISK")"
+        rm -f "$STATE_DIR/.apps_provisioned_v4" "$STATE_DIR/.apps_provisioned_v2" "$STATE_DIR/.apps_provisioned_v1"
+        sh "$ODM_ROOT/scripts/andarium_boot_complete.sh" "$MAGISKTMP"
         ;;
     *)
-        echo "Usage: $0 {status|status-json|selinux|adbroot|debuggable|stealth|proxy|display|module|frida|ssh|adblock|certs|shizuku|webui|pif-update|grant|logs|reboot|reprovision}" >&2
+        echo "Usage: $0 {status|status-json|mode|root|tweaks|selinux|adbroot|debuggable|stealth|proxy|display|module|denylist|grant|revoke|apps-json|bundled-json|bundled-install|bundled-uninstall|backup-export|frida|ssh|adblock|certs|shizuku|webui|pif-update|logs|reboot|reprovision}" >&2
         exit 2
         ;;
 esac

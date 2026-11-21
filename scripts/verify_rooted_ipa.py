@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Comprehensive independent verifier for a built Andarium Root IPA (v2)."""
+"""Comprehensive independent verifier for a built Andarium Root IPA (v4)."""
 
 from __future__ import annotations
 
@@ -26,8 +26,10 @@ MANIFESTS_DIR = ROOT_DIR / "manifests"
 
 sys.path.insert(0, str(SCRIPTS_DIR))
 import android_image  # noqa: E402
+import macho_inject  # noqa: E402
 
 IPA_APP_PREFIX = "Payload/Andarium.app/"
+IPA_MAIN_MACHO = IPA_APP_PREFIX + "Andarium"
 IPA_SYSTEM_PREFIX = IPA_APP_PREFIX + "andarium-system/"
 IPA_SYSTEM_IMG = IPA_SYSTEM_PREFIX + "guest/system.img"
 IPA_LAYOUT_JSON = IPA_SYSTEM_PREFIX + "guest/partition-layout.json"
@@ -35,6 +37,18 @@ IPA_MANIFEST_JSON = IPA_SYSTEM_PREFIX + "release-manifest.json"
 IPA_CMDLINE_TXT = IPA_SYSTEM_PREFIX + "boot/kernel-command-line.txt"
 IPA_INFO_PLIST = IPA_APP_PREFIX + "Info.plist"
 IPA_CODESIG_PREFIX = IPA_APP_PREFIX + "_CodeSignature/"
+IPA_PREBOOT_BUNDLE = IPA_APP_PREFIX + "AndariumRootPreboot.bundle/"
+IPA_PREBOOT_DYLIB = IPA_APP_PREFIX + "Frameworks/AndariumRootPreboot.dylib"
+PREBOOT_DYLIB_LOAD_PATH = "@executable_path/Frameworks/AndariumRootPreboot.dylib"
+
+EXPECTED_FRIDA_SCRIPTS = (
+    "ssl-pinning-bypass.js",
+    "root-detection-bypass.js",
+    "flutter-ssl-bypass.js",
+    "crypto-tracer.js",
+    "intent-monitor.js",
+)
+FORBIDDEN_CMDLINE_PREFIXES = ("ubd", "initrd", "root=", "rootfstype=", "--aot-release=")
 
 MACHO_EXECUTABLES = (
     IPA_APP_PREFIX + "Andarium",
@@ -168,6 +182,42 @@ def extract_stock_partition(base_ipa: Path, part_name: str, dst: Path) -> dict[s
     return layout
 
 
+def verify_cmdline(built_cmdline: bytes, stock_cmdline: bytes | None, *, expect_no_root: bool) -> None:
+    if expect_no_root:
+        if stock_cmdline is not None and built_cmdline != stock_cmdline:
+            fail("Unrooted build altered kernel-command-line.txt unexpectedly")
+        ok("unrooted kernel-command-line.txt is byte-for-byte identical to stock")
+        return
+
+    if b'"' in built_cmdline or b"'" in built_cmdline or b"\r" in built_cmdline:
+        fail("kernel-command-line.txt contains forbidden quotes or CR bytes")
+    if len(built_cmdline) > 2048:
+        fail(f"kernel-command-line.txt too long ({len(built_cmdline)} B > 2048 B safety ceiling)")
+    words = built_cmdline.decode("utf-8").split()
+    boot_dev_count = 0
+    ar_cfg = None
+    for w in words:
+        for pref in FORBIDDEN_CMDLINE_PREFIXES:
+            if w.startswith(pref):
+                fail(f"kernel-command-line.txt contains forbidden storage prefix: {w}")
+        if w.startswith("androidboot.boot_devices="):
+            if w != "androidboot.boot_devices=uml-blkdev.0,uml-blkdev.1":
+                fail(f"Invalid androidboot.boot_devices token: {w}")
+            boot_dev_count += 1
+        elif w.startswith("androidboot.ar.cfg="):
+            ar_cfg = w.split("=", 1)[1]
+    if boot_dev_count != 1:
+        fail(f"Expected androidboot.boot_devices exactly once, found {boot_dev_count}")
+    if ar_cfg is None or not ar_cfg.startswith("4,") or len(ar_cfg) >= 91:
+        fail(f"Invalid or missing androidboot.ar.cfg token: {ar_cfg!r}")
+    if stock_cmdline is not None:
+        stock_words = [w for w in stock_cmdline.decode("utf-8").split() if not w.startswith("androidboot.ar.")]
+        built_base = [w for w in words if not w.startswith("androidboot.ar.")]
+        if built_base != stock_words:
+            fail("Non-andarium stock kernel command line arguments were altered")
+    ok(f"kernel-command-line.txt passes android_boot.cpp safety rules + androidboot.ar.cfg ({len(built_cmdline)} B)")
+
+
 def verify_ipa_bundle(
     ipa_path: Path,
     base_ipa: Path | None,
@@ -175,6 +225,8 @@ def verify_ipa_bundle(
     expected_bundle_id: str,
     expected_display_name: str,
     expect_custom_icon: bool,
+    expect_no_root: bool,
+    expect_preboot_dylib: bool,
 ) -> tuple[dict[str, object], dict[str, object]]:
     with zipfile.ZipFile(ipa_path, "r") as zf:
         bad = zf.testzip()
@@ -197,20 +249,49 @@ def verify_ipa_bundle(
                 fail(f"Mach-O executable lost execute bits: {exe} (mode={oct(mode)})")
         ok(f"all {len(MACHO_EXECUTABLES)} Mach-O executables retain Unix execute permissions")
 
-        main_bin = zf.read(IPA_APP_PREFIX + "Andarium")
+        main_bin = zf.read(IPA_MAIN_MACHO)
         for ent in REQUIRED_ENTITLEMENTS:
             if ent not in main_bin:
                 fail(f"Missing required iOS entitlement in Andarium Mach-O: {ent.decode()}")
         ok("embedded iOS Mach-O entitlements preserved (increased-memory-limit + extended-virtual-addressing)")
 
+        if expect_preboot_dylib:
+            if IPA_PREBOOT_DYLIB not in names:
+                fail(f"Missing pre-boot dylib in IPA: {IPA_PREBOOT_DYLIB}")
+            dzi = zf.getinfo(IPA_PREBOOT_DYLIB)
+            dmode = (dzi.external_attr >> 16) & 0o777
+            if (dmode & 0o111) == 0:
+                fail(f"Pre-boot dylib not executable: mode={oct(dmode)}")
+            _ncmds, _sz, _min_off, dylibs = macho_inject.parse_macho64_dylibs(main_bin)
+            if PREBOOT_DYLIB_LOAD_PATH not in dylibs:
+                fail(f"Main Andarium Mach-O missing LC_LOAD_DYLIB for {PREBOOT_DYLIB_LOAD_PATH}")
+            ok(f"native iOS Pre-Boot dylib bundled & LC_LOAD_DYLIB verified ({PREBOOT_DYLIB_LOAD_PATH})")
+
+        if not expect_no_root:
+            for req_res in ("preboot.html", "defaults.json"):
+                zname = IPA_PREBOOT_BUNDLE + req_res
+                if zname not in names:
+                    fail(f"Missing pre-boot studio resource: {zname}")
+            defs = json.loads(zf.read(IPA_PREBOOT_BUNDLE + "defaults.json").decode("utf-8"))
+            if not defs.get("presets") or not defs.get("app_catalog") or not defs.get("default_config"):
+                fail("AndariumRootPreboot.bundle/defaults.json missing required sections")
+            ok(f"AndariumRootPreboot.bundle verified ({len(defs['presets'])} presets, {len(defs['app_catalog'])} catalog apps)")
+
+        stock_cmdline: bytes | None = None
         if base_ipa is not None:
             with zipfile.ZipFile(base_ipa, "r") as base_zf:
+                stock_cmdline = base_zf.read(IPA_CMDLINE_TXT)
                 for exe in MACHO_EXECUTABLES:
+                    if expect_preboot_dylib and exe == IPA_MAIN_MACHO:
+                        continue
                     if sha256_zip_member(zf, exe) != sha256_zip_member(base_zf, exe):
                         fail(f"Mach-O binary altered unexpectedly: {exe}")
-                if zf.read(IPA_CMDLINE_TXT) != base_zf.read(IPA_CMDLINE_TXT):
-                    fail("kernel-command-line.txt differs from base IPA")
-            ok("all 5 Mach-O binaries and kernel-command-line.txt are byte-for-byte identical to stock IPA")
+            if expect_preboot_dylib:
+                ok("all 4 framework Mach-O binaries are byte-for-byte stock (main binary cleanly LC_LOAD_DYLIB-patched)")
+            else:
+                ok("all 5 Mach-O binaries are byte-for-byte identical to stock IPA")
+
+        verify_cmdline(zf.read(IPA_CMDLINE_TXT), stock_cmdline, expect_no_root=expect_no_root)
 
         plist_raw = zf.read(IPA_INFO_PLIST)
         if not plist_raw.startswith(b"bplist00"):
@@ -359,6 +440,7 @@ def verify_odm(
     stock_odm_path: Path | None,
     work_dir: Path,
     *,
+    expect_no_root: bool,
     expect_modules: bool,
     expect_stealth: bool,
     expect_pentest: bool,
@@ -367,6 +449,7 @@ def verify_odm(
     expect_power_apps: bool,
     expect_microg: bool,
     expected_selinux: str,
+    expected_apk_names: list[str] | None,
 ) -> None:
     with odm_path.open("rb") as f:
         prefix = f.read(2048)
@@ -428,134 +511,181 @@ def verify_odm(
             payload_entries += 1
     ok(f"all {payload_entries} entries under /odm/andarium-root owned 0:0 with u:object_r:vendor_file:s0")
 
-    # Magisk runtime binaries
-    mbin = payload_root / "magisk-bin"
-    for name in ("busybox", "magiskboot", "magiskinit", "magiskpolicy", "bootctl", "magisk", "init-ld"):
-        check_elf_arch((mbin / name).read_bytes(), android_image.ELFCLASS64, android_image.EM_AARCH64, f"magisk-bin/{name}")
-    check_elf_arch((mbin / "magisk32").read_bytes(), android_image.ELFCLASS32, android_image.EM_ARM, "magisk-bin/magisk32")
-    uf_text = (mbin / "util_functions.sh").read_text(encoding="utf-8")
-    if "MAGISK_VER='31.1'" not in uf_text or "MAGISK_VER_CODE=31100" not in uf_text:
-        fail("magisk-bin/util_functions.sh version mismatch")
-    ok("magisk-bin full v31.1 runtime environment verified (ELF64/ARM32 + assets)")
+    if not (payload_root / "config" / "preset.json").is_file():
+        fail("Missing /odm/andarium-root/config/preset.json")
 
-    # Seeded magisk.db
-    db_path = payload_root / "config" / "magisk.db"
-    conn = sqlite3.connect(db_path)
-    try:
-        cur = conn.cursor()
-        if cur.execute("PRAGMA user_version;").fetchone()[0] != 13:
-            fail("magisk.db user_version != 13")
-        settings = dict(cur.execute("SELECT key, value FROM settings;").fetchall())
-        expected_zygisk = 0 if expect_modules else 1
-        if settings.get("zygisk") != expected_zygisk:
-            fail(f"magisk.db settings.zygisk={settings.get('zygisk')}, expected {expected_zygisk}")
-        shell_pol = cur.execute("SELECT policy FROM policies WHERE uid = 2000;").fetchone()
-        if shell_pol is None or shell_pol[0] != 2:
-            fail("magisk.db missing UID 2000 allow policy")
-    finally:
-        conn.close()
-    ok(f"magisk.db valid SQLite schema v13 (zygisk={expected_zygisk}, UID 2000 policy=2)")
+    if expect_no_root:
+        for forbidden in ("magisk-bin", "modules", "tools"):
+            if (payload_root / forbidden).exists():
+                fail(f"Unrooted build must not contain /odm/andarium-root/{forbidden}")
+        ok("unrooted build confirmed clean (no magisk-bin, modules, or pentest tools)")
+    else:
+        # Magisk runtime binaries
+        mbin = payload_root / "magisk-bin"
+        for name in ("busybox", "magiskboot", "magiskinit", "magiskpolicy", "bootctl", "magisk", "init-ld"):
+            check_elf_arch((mbin / name).read_bytes(), android_image.ELFCLASS64, android_image.EM_AARCH64, f"magisk-bin/{name}")
+        check_elf_arch((mbin / "magisk32").read_bytes(), android_image.ELFCLASS32, android_image.EM_ARM, "magisk-bin/magisk32")
+        uf_text = (mbin / "util_functions.sh").read_text(encoding="utf-8")
+        if "MAGISK_VER='31.1'" not in uf_text or "MAGISK_VER_CODE=31100" not in uf_text:
+            fail("magisk-bin/util_functions.sh version mismatch")
+        ok("magisk-bin full v31.1 runtime environment verified (ELF64/ARM32 + assets)")
 
-    mods_dir = payload_root / "modules"
+        # Seeded magisk.db
+        db_path = payload_root / "config" / "magisk.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            cur = conn.cursor()
+            if cur.execute("PRAGMA user_version;").fetchone()[0] != 13:
+                fail("magisk.db user_version != 13")
+            settings = dict(cur.execute("SELECT key, value FROM settings;").fetchall())
+            expected_zygisk = 0 if expect_modules else 1
+            if settings.get("zygisk") != expected_zygisk:
+                fail(f"magisk.db settings.zygisk={settings.get('zygisk')}, expected {expected_zygisk}")
+            shell_pol = cur.execute("SELECT policy FROM policies WHERE uid = 2000;").fetchone()
+            if shell_pol is None or shell_pol[0] != 2:
+                fail("magisk.db missing UID 2000 allow policy")
+        finally:
+            conn.close()
+        ok(f"magisk.db valid SQLite schema v13 (zygisk={expected_zygisk}, UID 2000 policy=2)")
 
-    # Andarium Root Control module (always present)
-    ctrl = mods_dir / "andarium_control"
-    for rel in ("module.prop", "service.sh", "action.sh", "webroot/index.html", "webroot/cgi-bin/api", "system/etc/hosts"):
-        if not (ctrl / rel).is_file():
-            fail(f"Missing andarium_control/{rel}")
-    for sh_rel in ("service.sh", "action.sh", "webroot/cgi-bin/api"):
-        sp = ctrl / sh_rel
-        if (stat.S_IMODE(sp.stat().st_mode) & 0o111) == 0:
-            fail(f"andarium_control/{sh_rel} is not executable")
-        check_shell_script(sp.read_bytes(), f"andarium_control/{sh_rel}")
-    ok("andarium_control module verified (WebUI + token CGI + systemless hosts, sh -n passed)")
+        mods_dir = payload_root / "modules"
 
-    # Core modules (ReZygisk + Vector)
-    if expect_modules:
-        rz = mods_dir / "rezygisk"
-        for rel in (
-            "module.prop", "module.prop.bak", "post-fs-data.sh", "service.sh", "uninstall.sh",
-            "sepolicy.rule", "bin/zygiskd64", "bin/zygiskd32", "bin/zygisk-ptrace64", "bin/zygisk-ptrace32",
-            "lib64/libzygisk.so", "lib/libzygisk.so", "machikado.arm64", "machikado.arm", "webroot/index.html",
-        ):
-            if not (rz / rel).is_file():
-                fail(f"Missing ReZygisk file: {rel}")
-        if not (mods_dir / "rezygisk.sh").is_file():
-            fail("Missing modules/rezygisk.sh")
+        # Andarium Root Control module (always present on rooted builds)
+        ctrl = mods_dir / "andarium_control"
+        for rel in ("module.prop", "service.sh", "action.sh", "webroot/index.html", "webroot/cgi-bin/api", "system/etc/hosts"):
+            if not (ctrl / rel).is_file():
+                fail(f"Missing andarium_control/{rel}")
+        for sh_rel in ("service.sh", "action.sh", "webroot/cgi-bin/api"):
+            sp = ctrl / sh_rel
+            if (stat.S_IMODE(sp.stat().st_mode) & 0o111) == 0:
+                fail(f"andarium_control/{sh_rel} is not executable")
+            check_shell_script(sp.read_bytes(), f"andarium_control/{sh_rel}")
+        ok("andarium_control v4 module verified (WebUI + token CGI + systemless hosts, sh -n passed)")
 
-        vec = mods_dir / "zygisk_vector"
-        for rel in (
-            "module.prop", "action.sh", "service.sh", "uninstall.sh", "sepolicy.rule",
-            "framework/vector.dex", "cli", "daemon", "daemon.apk", "manager.apk",
-            "zygisk/arm64-v8a.so", "zygisk/armeabi-v7a.so",
-            "bin/dex2oat64", "bin/dex2oat32", "bin/liboat_hook64.so", "bin/liboat_hook32.so",
-        ):
-            if not (vec / rel).is_file():
-                fail(f"Missing Vector file: {rel}")
-        for p in (vec / "daemon.apk", vec / "bin/dex2oat64", vec / "bin/dex2oat32"):
-            if VECTOR_PLACEHOLDER in p.read_bytes():
-                fail(f"Vector placeholder still present in {p.name}")
-        with zipfile.ZipFile(vec / "daemon.apk", "r") as dzf:
-            if dzf.testzip() is not None:
-                fail("Vector daemon.apk failed testzip()")
-        ok("ReZygisk v1.0.0 + Vector v2.2-3119 staged cleanly (anti-detection patched & daemon.apk CRC valid)")
+        # Core modules (ReZygisk + Vector)
+        if expect_modules:
+            rz = mods_dir / "rezygisk"
+            for rel in (
+                "module.prop", "module.prop.bak", "post-fs-data.sh", "service.sh", "uninstall.sh",
+                "sepolicy.rule", "bin/zygiskd64", "bin/zygiskd32", "bin/zygisk-ptrace64", "bin/zygisk-ptrace32",
+                "lib64/libzygisk.so", "lib/libzygisk.so", "machikado.arm64", "machikado.arm", "webroot/index.html",
+            ):
+                if not (rz / rel).is_file():
+                    fail(f"Missing ReZygisk file: {rel}")
+            if not (mods_dir / "rezygisk.sh").is_file():
+                fail("Missing modules/rezygisk.sh")
 
-    # Stealth modules (PlayIntegrityFork + TrickyStore + Zygisk-Assistant)
-    if expect_stealth:
-        for rel in ("module.prop", "post-fs-data.sh", "service.sh", "action.sh", "classes.dex", "zygisk/arm64-v8a.so"):
-            if not (mods_dir / "playintegrityfix" / rel).is_file():
-                fail(f"Missing PlayIntegrityFork file: {rel}")
-        for rel in ("module.prop", "service.sh", "service.apk", "sepolicy.rule", "daemon", "libtricky_store.so", "machikado"):
-            if not (mods_dir / "tricky_store" / rel).is_file():
-                fail(f"Missing TrickyStore file: {rel}")
-        for cfg in ("keybox.xml", "target.txt"):
-            if not (payload_root / "config" / "tricky_store" / cfg).is_file():
-                fail(f"Missing TrickyStore default config: {cfg}")
-        for rel in ("module.prop", "post-fs-data.sh", "service.sh", "zygisk/arm64-v8a.so"):
-            if not (mods_dir / "zygisk-assistant" / rel).is_file():
-                fail(f"Missing Zygisk-Assistant file: {rel}")
-        ok("Stealth stack verified (PlayIntegrityFork v19 + TrickyStore v1.4.1 + Zygisk-Assistant v2.1.4)")
+            vec = mods_dir / "zygisk_vector"
+            for rel in (
+                "module.prop", "action.sh", "service.sh", "uninstall.sh", "sepolicy.rule",
+                "framework/vector.dex", "cli", "daemon", "daemon.apk", "manager.apk",
+                "zygisk/arm64-v8a.so", "zygisk/armeabi-v7a.so",
+                "bin/dex2oat64", "bin/dex2oat32", "bin/liboat_hook64.so", "bin/liboat_hook32.so",
+            ):
+                if not (vec / rel).is_file():
+                    fail(f"Missing Vector file: {rel}")
+            for p in (vec / "daemon.apk", vec / "bin/dex2oat64", vec / "bin/dex2oat32"):
+                if VECTOR_PLACEHOLDER in p.read_bytes():
+                    fail(f"Vector placeholder still present in {p.name}")
+            with zipfile.ZipFile(vec / "daemon.apk", "r") as dzf:
+                if dzf.testzip() is not None:
+                    fail("Vector daemon.apk failed testzip()")
+            ok("ReZygisk v1.0.0 + Vector v2.2-3119 staged cleanly (anti-detection patched & daemon.apk CRC valid)")
 
-    # Pentest tools (Frida Server + static/NDK ARM64 CLI suite)
-    if expect_pentest:
-        frida_bin = payload_root / "tools" / "frida-server"
-        if not frida_bin.is_file() or (stat.S_IMODE(frida_bin.stat().st_mode) & 0o111) == 0:
-            fail("frida-server missing or not executable")
-        check_elf_arch(frida_bin.read_bytes(), android_image.ELFCLASS64, android_image.EM_AARCH64, "tools/frida-server")
-        for cname in ("strace", "socat", "sqlite3", "jq", "tcpdump"):
-            cp = payload_root / "tools" / "cli" / cname
-            if not cp.is_file() or (stat.S_IMODE(cp.stat().st_mode) & 0o111) == 0:
-                fail(f"CLI pentest tool missing or not executable: {cname}")
-            check_elf_arch(cp.read_bytes(), android_image.ELFCLASS64, android_image.EM_AARCH64, f"tools/cli/{cname}")
-        ok(f"Pentest lab verified (Frida Server {frida_bin.stat().st_size:,} B + 5 ARM64 CLI tools: strace, socat, sqlite3, jq, tcpdump)")
+        # Stealth modules (PlayIntegrityFork + TrickyStore + Zygisk-Assistant)
+        if expect_stealth:
+            for rel in ("module.prop", "post-fs-data.sh", "service.sh", "action.sh", "classes.dex", "zygisk/arm64-v8a.so"):
+                if not (mods_dir / "playintegrityfix" / rel).is_file():
+                    fail(f"Missing PlayIntegrityFork file: {rel}")
+            for rel in ("module.prop", "service.sh", "service.apk", "sepolicy.rule", "daemon", "libtricky_store.so", "machikado"):
+                if not (mods_dir / "tricky_store" / rel).is_file():
+                    fail(f"Missing TrickyStore file: {rel}")
+            for cfg in ("keybox.xml", "target.txt"):
+                if not (payload_root / "config" / "tricky_store" / cfg).is_file():
+                    fail(f"Missing TrickyStore default config: {cfg}")
+            for rel in ("module.prop", "post-fs-data.sh", "service.sh", "zygisk/arm64-v8a.so"):
+                if not (mods_dir / "zygisk-assistant" / rel).is_file():
+                    fail(f"Missing Zygisk-Assistant file: {rel}")
+            ok("Stealth stack verified (PlayIntegrityFork v19 + TrickyStore v1.4.1 + Zygisk-Assistant v2.1.4)")
 
-    # Networking tools (Dropbear SSH + StevenBlack hosts)
-    if expect_network:
-        for bname in ("dropbear", "dropbearkey", "dropbearconvert", "dbclient", "scp"):
-            bp = payload_root / "tools" / "dropbear" / bname
-            if not bp.is_file() or (stat.S_IMODE(bp.stat().st_mode) & 0o111) == 0:
-                fail(f"Dropbear binary missing or not executable: {bname}")
-            check_elf_arch(bp.read_bytes(), android_image.ELFCLASS64, android_image.EM_AARCH64, f"tools/dropbear/{bname}")
-        hosts_cfg = payload_root / "config" / "hosts.adblock"
-        hosts_mod = ctrl / "system" / "etc" / "hosts"
-        if not hosts_cfg.is_file() or hosts_cfg.stat().st_size < 500_000:
-            fail("hosts.adblock missing or unexpectedly small")
-        if hosts_mod.stat().st_size < 500_000:
-            fail("andarium_control/system/etc/hosts not populated with adblock hosts")
-        ok(f"Networking pack verified (Dropbear 2026.94 5x ARM64 ELFs + StevenBlack hosts {hosts_mod.stat().st_size:,} B)")
+        # Pentest tools (Frida Server + script pack + static/NDK ARM64 CLI suite)
+        if expect_pentest:
+            frida_bin = payload_root / "tools" / "frida-server"
+            if not frida_bin.is_file() or (stat.S_IMODE(frida_bin.stat().st_mode) & 0o111) == 0:
+                fail("frida-server missing or not executable")
+            check_elf_arch(frida_bin.read_bytes(), android_image.ELFCLASS64, android_image.EM_AARCH64, "tools/frida-server")
+            for js_name in EXPECTED_FRIDA_SCRIPTS:
+                jp = payload_root / "tools" / "frida-scripts" / js_name
+                if not jp.is_file():
+                    fail(f"Missing bundled Frida script: tools/frida-scripts/{js_name}")
+                if b"\r" in jp.read_bytes():
+                    fail(f"Frida script {js_name} contains CR bytes")
+                if stat.S_IMODE(jp.stat().st_mode) != 0o644:
+                    fail(f"Frida script {js_name} mode={oct(stat.S_IMODE(jp.stat().st_mode))}, expected 0o644")
+            for cname in ("strace", "socat", "sqlite3", "jq", "tcpdump"):
+                cp = payload_root / "tools" / "cli" / cname
+                if not cp.is_file() or (stat.S_IMODE(cp.stat().st_mode) & 0o111) == 0:
+                    fail(f"CLI pentest tool missing or not executable: {cname}")
+                check_elf_arch(cp.read_bytes(), android_image.ELFCLASS64, android_image.EM_AARCH64, f"tools/cli/{cname}")
+            ok(
+                f"Pentest lab verified (Frida Server {frida_bin.stat().st_size:,} B + "
+                f"{len(EXPECTED_FRIDA_SCRIPTS)} Frida bypass scripts + 5 ARM64 CLI tools)"
+            )
+
+        # Networking tools (Dropbear SSH + StevenBlack hosts)
+        if expect_network:
+            for bname in ("dropbear", "dropbearkey", "dropbearconvert", "dbclient", "scp"):
+                bp = payload_root / "tools" / "dropbear" / bname
+                if not bp.is_file() or (stat.S_IMODE(bp.stat().st_mode) & 0o111) == 0:
+                    fail(f"Dropbear binary missing or not executable: {bname}")
+                check_elf_arch(bp.read_bytes(), android_image.ELFCLASS64, android_image.EM_AARCH64, f"tools/dropbear/{bname}")
+            hosts_cfg = payload_root / "config" / "hosts.adblock"
+            hosts_mod = ctrl / "system" / "etc" / "hosts"
+            if not hosts_cfg.is_file() or hosts_cfg.stat().st_size < 500_000:
+                fail("hosts.adblock missing or unexpectedly small")
+            if hosts_mod.stat().st_size < 500_000:
+                fail("andarium_control/system/etc/hosts not populated with adblock hosts")
+            ok(f"Networking pack verified (Dropbear 2026.94 5x ARM64 ELFs + StevenBlack hosts {hosts_mod.stat().st_size:,} B)")
+
+        # Guest scripts on /odm
+        scripts_dir = payload_root / "scripts"
+        for sname in ("andarium_boot_complete.sh", "andarium-ctl", "andarium-termux-setup", "andarium-shell-rc.sh"):
+            sp = scripts_dir / sname
+            if not sp.is_file() or (stat.S_IMODE(sp.stat().st_mode) & 0o111) == 0:
+                fail(f"Script {sname} missing or not executable")
+            data = sp.read_bytes()
+            check_shell_script(data, f"odm:/andarium-root/scripts/{sname}")
+            if sname == "andarium_boot_complete.sh":
+                if f'DEFAULT_SELINUX="{expected_selinux}"'.encode() not in data:
+                    fail(f"andarium_boot_complete.sh missing DEFAULT_SELINUX={expected_selinux!r}")
+        ok("all 4 /odm guest scripts LF-only, executable, and pass sh -n")
 
     # Bundled APKs (pinned SHA-256 + testzip)
     artifacts = json.loads((MANIFESTS_DIR / "artifacts.json").read_text(encoding="utf-8"))
-    apk_groups = {
-        "apps": expect_apps,
-        "microg": expect_microg,
-        "power_apps": expect_power_apps,
-        "pentest": expect_pentest,
-    }
-    expected_apks: list[tuple[str, str]] = [("01-magisk.apk", artifacts["magisk"]["sha256"])]
+    sha_by_install_name = {"01-magisk.apk": str(artifacts["magisk"]["sha256"])}
     for _k, entry in artifacts["apks"].items():
-        if apk_groups.get(str(entry["group"]), False):
-            expected_apks.append((str(entry["install_name"]), str(entry["sha256"])))
+        sha_by_install_name[str(entry["install_name"])] = str(entry["sha256"])
+
+    expected_apks: list[tuple[str, str]] = []
+    if expected_apk_names is not None:
+        for fname in expected_apk_names:
+            if not fname:
+                continue
+            if fname not in sha_by_install_name:
+                fail(f"Unknown APK name in --expected-apks: {fname}")
+            expected_apks.append((fname, sha_by_install_name[fname]))
+    else:
+        if not expect_no_root:
+            expected_apks.append(("01-magisk.apk", sha_by_install_name["01-magisk.apk"]))
+        apk_groups = {
+            "apps": expect_apps,
+            "microg": expect_microg,
+            "power_apps": expect_power_apps,
+            "pentest": expect_pentest and not expect_no_root,
+        }
+        for _k, entry in artifacts["apks"].items():
+            if apk_groups.get(str(entry["group"]), False):
+                expected_apks.append((str(entry["install_name"]), str(entry["sha256"])))
 
     apks_dir = payload_root / "apks"
     for fname, exp_sha in expected_apks:
@@ -569,27 +699,17 @@ def verify_odm(
                 fail(f"APK {fname} failed testzip()")
     ok(f"all {len(expected_apks)} bundled APKs match pinned SHA-256s and pass ZIP verification")
 
-    # Guest scripts on /odm
-    scripts_dir = payload_root / "scripts"
-    for sname in ("andarium_boot_complete.sh", "andarium-ctl", "andarium-termux-setup", "andarium-shell-rc.sh"):
-        sp = scripts_dir / sname
-        if not sp.is_file() or (stat.S_IMODE(sp.stat().st_mode) & 0o111) == 0:
-            fail(f"Script {sname} missing or not executable")
-        data = sp.read_bytes()
-        check_shell_script(data, f"odm:/andarium-root/scripts/{sname}")
-        if sname == "andarium_boot_complete.sh":
-            if f'DEFAULT_SELINUX="{expected_selinux}"'.encode() not in data:
-                fail(f"andarium_boot_complete.sh missing DEFAULT_SELINUX={expected_selinux!r}")
-    ok("all 4 /odm guest scripts LF-only, executable, and pass sh -n")
-
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Verify a rooted Andarium IPA (v2) thoroughly.")
-    parser.add_argument("--ipa", type=Path, required=True, help="Path to rooted IPA to verify")
+    parser = argparse.ArgumentParser(description="Verify an Andarium Root IPA (v4) thoroughly.")
+    parser.add_argument("--ipa", type=Path, required=True, help="Path to built IPA to verify")
     parser.add_argument("--base-ipa", type=Path, help="Optional stock base IPA for byte-for-byte comparison")
     parser.add_argument("--expected-bundle-id", default="com.andarium.root")
     parser.add_argument("--expected-display-name", default="Andarium Root")
     parser.add_argument("--expected-selinux", choices=("permissive", "enforcing"), default="permissive")
+    parser.add_argument("--expected-apks", default=None, help="Optional comma-separated install_name list of staged APKs")
+    parser.add_argument("--no-root", action="store_true", help="Verify build-time unrooted IPA (stock init_boot untouched)")
+    parser.add_argument("--expect-preboot-dylib", action="store_true", help="Verify native iOS Pre-Boot dylib & LC_LOAD_DYLIB")
     parser.add_argument("--no-modules", action="store_true")
     parser.add_argument("--no-stealth", action="store_true")
     parser.add_argument("--no-pentest", action="store_true")
@@ -614,6 +734,8 @@ def main() -> int:
         expected_bundle_id=args.expected_bundle_id,
         expected_display_name=args.expected_display_name,
         expect_custom_icon=not args.no_custom_icon,
+        expect_no_root=args.no_root,
+        expect_preboot_dylib=args.expect_preboot_dylib,
     )
 
     work_dir = Path(tempfile.mkdtemp(prefix="andarium_root_verify_"))
@@ -665,15 +787,28 @@ def main() -> int:
         ib_start, ib_size = android_image.partition_range(layout_path, disk_path, "init_boot", VerifyError)
         ib_path = work_dir / "init_boot.img"
         extract_partition_slice(disk_path, ib_start, ib_size, ib_path)
-        verify_init_boot(ib_path, stock_init_boot, expected_selinux=args.expected_selinux)
+        if args.no_root:
+            if stock_init_boot is not None and sha256_file(ib_path) != sha256_file(stock_init_boot):
+                fail("Unrooted build modified init_boot.img unexpectedly")
+            with ib_path.open("rb") as df:
+                android_image.parse_boot_image(df, 0, ib_path.stat().st_size, VerifyError)
+            ok("unrooted init_boot.img verified byte-for-byte stock untouched")
+        else:
+            verify_init_boot(ib_path, stock_init_boot, expected_selinux=args.expected_selinux)
 
         odm_start, odm_size = android_image.partition_range(layout_path, disk_path, "odm", VerifyError)
         odm_path = work_dir / "odm.img"
         extract_partition_slice(disk_path, odm_start, odm_size, odm_path)
+        expected_apk_list = (
+            [x.strip() for x in args.expected_apks.split(",") if x.strip()]
+            if args.expected_apks is not None
+            else None
+        )
         verify_odm(
             odm_path,
             stock_odm,
             work_dir,
+            expect_no_root=args.no_root,
             expect_modules=not args.no_modules,
             expect_stealth=not args.no_stealth,
             expect_pentest=not args.no_pentest,
@@ -682,6 +817,7 @@ def main() -> int:
             expect_power_apps=not args.no_power_apps,
             expect_microg=not args.no_microg,
             expected_selinux=args.expected_selinux,
+            expected_apk_names=expected_apk_list,
         )
 
         print("[verify] ALL VERIFICATION CHECKS PASSED!", flush=True)

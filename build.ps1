@@ -2,16 +2,24 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 <#
 .SYNOPSIS
-    Build and verify the rooted Andarium IPA via WSL2.
+    Build and verify a customizable Andarium Root IPA (v4) via WSL2.
 .EXAMPLE
     .\build.ps1
+    .\build.ps1 -Preset seceng -IconTheme crimson
+    .\build.ps1 -Preset gamer -IconTheme cyber
+    .\build.ps1 -Preset unrooted -NoRoot -IconTheme stealth
+    .\build.ps1 -Config .\andarium-config.json
     .\build.ps1 -Profile lite
-    .\build.ps1 -Profile stealth
-    .\build.ps1 -Profile ultimate --selinux enforcing --display-name "Andarium Root"
 #>
 param(
+    [ValidateSet("", "mix", "seceng", "hacker", "gamer", "privacy", "unrooted")]
+    [string]$Preset = "",
     [ValidateSet("ultimate", "lite", "stealth")]
     [string]$Profile = "ultimate",
+    [ValidateSet("", "duskjade", "crimson", "cyber", "stealth", "stock")]
+    [string]$IconTheme = "",
+    [string]$Config = "",
+    [switch]$NoRoot,
     [string]$Distro = "kali-linux",
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$BuilderArgs
@@ -31,19 +39,40 @@ if ($LASTEXITCODE -ne 0) {
     throw "WSL distro '$Distro' is missing python3 or erofs-utils (mkfs.erofs/fsck.erofs/dump.erofs). Install with: wsl -d $Distro -- apt-get update && apt-get install -y python3 erofs-utils"
 }
 
-$RepoWinSlash = $RepoWin -replace '\\', '/'
-$RepoWsl = ((& wsl.exe -d $Distro -- wslpath -a -u $RepoWinSlash) | Out-String).Trim()
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($RepoWsl)) {
-    throw "Failed to convert workspace path '$RepoWin' to WSL path."
+function Convert-ToWslPath([string]$WinPath) {
+    $slash = $WinPath -replace '\\', '/'
+    $wsl = ((& wsl.exe -d $Distro -- wslpath -a -u $slash) | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($wsl)) {
+        throw "Failed to convert path '$WinPath' to WSL path."
+    }
+    return $wsl
 }
 
+$RepoWsl = Convert-ToWslPath $RepoWin
 $ScriptWsl = "$RepoWsl/scripts/build_rooted_ipa.py"
-$AllArgs = @("--profile", $Profile)
+
+$AllArgs = @()
+if ($Preset) {
+    $AllArgs += @("--preset", $Preset)
+} else {
+    $AllArgs += @("--profile", $Profile)
+}
+if ($IconTheme) {
+    $AllArgs += @("--icon-theme", $IconTheme)
+}
+if ($Config) {
+    $cfgResolved = (Resolve-Path $Config).Path
+    $AllArgs += @("--config", (Convert-ToWslPath $cfgResolved))
+}
+if ($NoRoot) {
+    $AllArgs += "--no-root"
+}
 if ($BuilderArgs) {
     $AllArgs += $BuilderArgs
 }
 
-Write-Host "Running builder in WSL ($Distro) [profile=$Profile]: $ScriptWsl $($AllArgs -join ' ')" -ForegroundColor Cyan
+$label = if ($Preset) { "preset=$Preset" } else { "profile=$Profile" }
+Write-Host "Running builder in WSL ($Distro) [$label]: $ScriptWsl $($AllArgs -join ' ')" -ForegroundColor Cyan
 
 & wsl.exe -d $Distro -- python3 $ScriptWsl @AllArgs
 exit $LASTEXITCODE

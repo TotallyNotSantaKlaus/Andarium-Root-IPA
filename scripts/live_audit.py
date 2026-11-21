@@ -111,7 +111,8 @@ def main() -> int:
         status = json.loads(r.stdout.strip())
         audit.ok(
             "andarium-ctl telemetry",
-            f"SELinux={status.get('selinux')}, stealth={status.get('stealth')}, "
+            f"mode={status.get('active_mode')}, preboot={status.get('preboot_preset')}, "
+            f"su={status.get('root_su')}, SELinux={status.get('selinux')}, stealth={status.get('stealth')}, "
             f"ro.debuggable={status.get('debuggable')}, adbroot={status.get('adbroot')}, "
             f"modules={len(status.get('modules', []))}",
         )
@@ -180,16 +181,18 @@ def main() -> int:
     else:
         audit.warn("On-device Control Panel (127.0.0.1:8787)", r.stdout.strip())
 
-    # 9. Pentest & Networking tools executable
+    # 9. Pentest & Networking tools + Frida ready-to-run script pack
     r = audit.shell(
         "frida-server --version && dropbear -V 2>&1 | head -n1 && "
-        "for t in strace socat sqlite3 jq tcpdump; do command -v $t >/dev/null || exit 1; done && echo CLI_SUITE_OK",
+        "for t in strace socat sqlite3 jq tcpdump; do command -v $t >/dev/null || exit 1; done && "
+        "SCOUNT=$(ls -1 /odm/andarium-root/tools/frida-scripts/*.js 2>/dev/null | wc -l) && "
+        "echo \"CLI_SUITE_OK SCRIPTS=$SCOUNT\"",
         root=True,
     )
     if r.returncode == 0 and "Dropbear" in r.stdout and "CLI_SUITE_OK" in r.stdout:
         audit.ok(
-            "Frida, Dropbear SSH & 5 ARM64 CLI tools on PATH",
-            " / ".join(ln.strip() for ln in r.stdout.splitlines()[:2]) + " + strace/socat/sqlite3/jq/tcpdump",
+            "Frida, Dropbear SSH, 5 CLI tools & Frida script pack",
+            " / ".join(ln.strip() for ln in r.stdout.splitlines()[:2]) + " + strace/socat/sqlite3/jq/tcpdump + scripts",
         )
     else:
         audit.warn("Frida / Dropbear / CLI tools", (r.stdout + r.stderr).strip())
@@ -207,6 +210,8 @@ def main() -> int:
         ("Shizuku", "moe.shizuku.privileged.api"),
         ("Neo Backup", "com.machiav3lli.backup"),
         ("TrustMeAlready", "com.virb3.trustmealready"),
+        ("Disable FLAG_SECURE", "io.github.lsposed.disableflagsecure"),
+        ("GPS Setter", "com.android1500.gpssetter"),
     ]
     r_pkgs = audit.shell("pm list packages", root=True)
     installed = set(ln.replace("package:", "").strip() for ln in r_pkgs.stdout.splitlines())

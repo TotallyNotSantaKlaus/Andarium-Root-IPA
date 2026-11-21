@@ -260,6 +260,32 @@
       "url": "https://github.com/ViRb3/TrustMeAlready/releases/download/v1.11/TrustMeAlready-v1.11-release.apk",
       "sha256": "ed6548bf43ec1373a430bfcfb0a01c5ccf50847b322f42012acb8ee9ee1327e5",
       "size": 10127
+    },
+    "disable_flag_secure": {
+      "name": "DisableFlagSecure-v5.0.1.apk",
+      "install_name": "12-disable-flag-secure.apk",
+      "package": "io.github.lsposed.disableflagsecure",
+      "group": "pentest",
+      "grant_root": false,
+      "manage_storage": false,
+      "battery_whitelist": false,
+      "install_packages": false,
+      "url": "https://github.com/LSPosed/DisableFlagSecure/releases/download/v5.0.1/app-release.apk",
+      "sha256": "dcf2006ad130ed58e97cc2bc506e9548044349ebd651c07c7646dd51acb4e852",
+      "size": 20880
+    },
+    "gps_setter": {
+      "name": "GpsSetter-v1.2.10.apk",
+      "install_name": "13-gps-setter.apk",
+      "package": "com.android1500.gpssetter",
+      "group": "pentest",
+      "grant_root": false,
+      "manage_storage": false,
+      "battery_whitelist": false,
+      "install_packages": false,
+      "url": "https://github.com/Android1500/GpsSetter/releases/download/v1.2.10/app-release.apk",
+      "sha256": "90812c7100df91cb97a7e46d45bbcf1a12c8f7c36b2e1dc8df85f91a381eb967",
+      "size": 6224594
     }
   }
 }

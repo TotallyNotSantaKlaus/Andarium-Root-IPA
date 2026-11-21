@@ -14,6 +14,10 @@
       - ssh              Connect via OpenSSH to root@127.0.0.1:2222 (after ssh-setup)
       - mitm             Push a Burp/mitmproxy/HTTP Toolkit CA cert (.pem/.crt/.der) to Android 17 Conscrypt + optionally set HTTP proxy
       - proxy-clear      Clear global HTTP proxy on Android
+      - mode             Switch live operating mode (`-Arg dev|pentest|gamer|stealth`)
+      - root             Hide or restore Magisk root at runtime (`-Arg hide|restore|status`)
+      - backup           Export Andarium Root config/DenyList/SSH keys JSON to PC (`-Arg backup.json`)
+      - install-bundled  Install pre-staged APKs from /odm/andarium-root/apks over ADB (works even on --no-root IPAs!)
       - stealth          Toggle Stealth Mode (`-Arg on` or `-Arg off`)
       - selinux          Toggle SELinux (`-Arg permissive` or `-Arg enforcing`)
       - install          Install a local APK onto Android (`-Arg C:\path\app.apk`)
@@ -21,12 +25,14 @@
       - audit            Run the full live ADB audit (`audit.ps1`)
 .EXAMPLE
     .\companion.ps1 -Connect 192.168.1.42:5555 -Action webui
+    .\companion.ps1 -Action mode -Arg pentest
     .\companion.ps1 -Action frida
     .\companion.ps1 -Action ssh-setup
     .\companion.ps1 -Action mitm -Arg C:\Users\you\burp.der -Proxy 192.168.1.10:8080
+    .\companion.ps1 -Action backup -Arg .\andarium-backup.json
 #>
 param(
-    [ValidateSet("status", "shell", "webui", "frida", "frida-stop", "ssh-setup", "ssh", "mitm", "proxy-clear", "stealth", "selinux", "install", "logcat", "audit")]
+    [ValidateSet("status", "shell", "webui", "frida", "frida-stop", "ssh-setup", "ssh", "mitm", "proxy-clear", "mode", "root", "backup", "install-bundled", "stealth", "selinux", "install", "logcat", "audit")]
     [string]$Action = "status",
     [string]$Connect,
     [string]$Serial,
@@ -151,6 +157,33 @@ print(f'{h}.0')
     }
     "proxy-clear" {
         Invoke-Adb @("shell", "su", "-c", "andarium-ctl proxy clear")
+    }
+    "mode" {
+        $m = if ($Arg) { $Arg } else { "dev" }
+        Invoke-Adb @("shell", "su", "-c", "andarium-ctl mode $m")
+    }
+    "root" {
+        $r = if ($Arg) { $Arg } else { "status" }
+        Invoke-Adb @("shell", "su", "-c", "andarium-ctl root $r")
+    }
+    "backup" {
+        $outPath = if ($Arg) { $Arg } else { "andarium-backup.json" }
+        $json = Invoke-AdbCapture @("shell", "su", "-c", "andarium-ctl backup-export")
+        Set-Content -Path $outPath -Value $json -Encoding utf8
+        Write-Host "[companion] Exported config backup to $outPath" -ForegroundColor Green
+    }
+    "install-bundled" {
+        $apkList = Invoke-AdbCapture @("shell", "ls -1 /odm/andarium-root/apks/*.apk 2>/dev/null")
+        $files = @($apkList -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -like "*.apk" })
+        if ($files.Count -eq 0) {
+            throw "No bundled APKs found under /odm/andarium-root/apks/"
+        }
+        foreach ($remoteApk in $files) {
+            $name = Split-Path -Leaf $remoteApk
+            Write-Host "[companion] Installing $name..." -ForegroundColor Cyan
+            Invoke-Adb @("shell", "cp '$remoteApk' /data/local/tmp/_ar_inst.apk && pm install -r -g /data/local/tmp/_ar_inst.apk && rm -f /data/local/tmp/_ar_inst.apk")
+        }
+        Write-Host "[companion] Installed $($files.Count) bundled APK(s)!" -ForegroundColor Green
     }
     "stealth" {
         $mode = if ($Arg) { $Arg } else { "status" }

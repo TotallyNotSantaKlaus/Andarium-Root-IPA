@@ -1,6 +1,9 @@
 # Local download cache, build artifacts & staging
 .cache/
 work/
+build-ios/
+assets/ios/*.dylib
+andarium-config.json
 dist/*.ipa
 dist/*.sha256
 dist/SHA256SUMS.txt
