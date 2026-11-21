@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Andarium Root Control v3</title>
+<style>
+  :root {
+    --bg: #070d0b;
+    --card: #0e1815;
+    --card2: #12211d;
+    --border: #1d352e;
+    --accent: #34f5a1;
+    --accent-dim: rgba(52, 245, 161, 0.14);
+    --danger: #ff5c77;
+    --danger-dim: rgba(255, 92, 119, 0.14);
+    --text: #e6f4ee;
+    --muted: #84a397;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: 14px; padding-bottom: 48px;
+    background: radial-gradient(circle at 50% 0%, #102920 0%, var(--bg) 52%);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+    font-size: 14px; line-height: 1.45;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px; padding: 4px 2px; gap: 8px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .logo {
+    width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+    background: linear-gradient(135deg, #0d261d, #07120e);
+    border: 1.5px solid var(--accent);
+    display: grid; place-items: center;
+    color: var(--accent); font-weight: 800; font-size: 20px;
+    box-shadow: 0 0 14px rgba(52, 245, 161, 0.25);
+  }
+  h1 { margin: 0; font-size: 17px; letter-spacing: 0.2px; }
+  .sub { font-size: 11px; color: var(--muted); }
+  .pill {
+    padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 600;
+    border: 1px solid var(--border); background: var(--card2); color: var(--muted);
+  }
+  .pill.on { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+  .pill.warn { border-color: var(--danger); background: var(--danger-dim); color: var(--danger); }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
+  .stat {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 10px 12px;
+  }
+  .stat .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat .v { font-size: 13px; font-weight: 600; margin-top: 2px; word-break: break-word; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 12px 14px; margin-bottom: 12px;
+  }
+  .card h2 {
+    margin: 0 0 10px; font-size: 13px; color: var(--accent);
+    text-transform: uppercase; letter-spacing: 0.7px;
+  }
+  .row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 0; border-top: 1px solid rgba(255,255,255,0.05); gap: 10px;
+  }
+  .row:first-of-type { border-top: none; padding-top: 2px; }
+  .row-info { flex: 1; min-width: 0; }
+  .row-title { font-weight: 600; font-size: 14px; }
+  .row-desc { font-size: 11.5px; color: var(--muted); }
+  .btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  button {
+    border: 1px solid var(--border); background: var(--card2); color: var(--text);
+    padding: 7px 10px; border-radius: 9px; font-size: 12px; font-weight: 600;
+    cursor: pointer; transition: 0.12s ease;
+  }
+  button:active { transform: scale(0.96); }
+  button.primary { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+  button.danger { border-color: var(--danger); background: var(--danger-dim); color: var(--danger); }
+  .input-row { display: flex; gap: 6px; margin-top: 7px; }
+  input[type="text"] {
+    flex: 1; min-width: 0; background: #09120f; border: 1px solid var(--border); border-radius: 9px;
+    color: var(--text); padding: 8px 10px; font-size: 13px; outline: none;
+  }
+  input[type="text"]:focus { border-color: var(--accent); }
+  .list-box { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+  .list-item {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    background: #0a1310; border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 9px; padding: 7px 10px;
+  }
+  pre {
+    background: #050a08; border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px; font-size: 11px; color: #a7d4c1; max-height: 240px;
+    overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 8px 0 0;
+  }
+  #toast {
+    position: fixed; left: 14px; right: 14px; bottom: 14px;
+    background: #0f241c; border: 1px solid var(--accent); color: var(--text);
+    padding: 10px 14px; border-radius: 11px; font-size: 12.5px;
+    box-shadow: 0 8px 26px rgba(0,0,0,0.55); display: none; z-index: 99;
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">#</div>
+    <div>
+      <h1>Andarium Root</h1>
+      <div class="sub" id="hdr-sub">Connecting...</div>
+    </div>
+  </div>
+  <div class="btns">
+    <button class="primary" onclick="refresh()">Refresh</button>
+    <button class="danger" onclick="confirmReboot()">Reboot</button>
+  </div>
+</header>
+
+<div class="grid">
+  <div class="stat"><div class="k">Magisk</div><div class="v" id="st-magisk">—</div></div>
+  <div class="stat"><div class="k">SELinux</div><div class="v" id="st-selinux">—</div></div>
+  <div class="stat"><div class="k">Mode</div><div class="v" id="st-stealth">—</div></div>
+  <div class="stat"><div class="k">Memory</div><div class="v" id="st-mem">—</div></div>
+</div>
+
+<div class="card">
+  <h2>Core &amp; Stealth Controls</h2>
+  <div class="row">
+    <div class="row-info">
+      <div class="row-title">Stealth Mode</div>
+      <div class="row-desc">Enforcing SELinux, DenyList ON, hides debuggable &amp; stops Frida/SSH</div>
+    </div>
+    <div class="btns">
+      <button id="btn-stealth-on" onclick="act('stealth','on')">Enable</button>
+      <button id="btn-stealth-off" onclick="act('stealth','off')">Dev Mode</button>
+    </div>
+  </div>
+  <div class="row">
+    <div class="row-info">
+      <div class="row-title">SELinux Policy</div>
+      <div class="row-desc">Persistent across reboots</div>
+    </div>
+    <div class="btns">
+      <button id="btn-se-perm" onclick="act('selinux','permissive')">Permissive</button>
+      <button id="btn-se-enf" onclick="act('selinux','enforcing')">Enforcing</button>
+    </div>
+  </div>
+  <div class="row">
+    <div class="row-info">
+      <div class="row-title">Native ADB Root</div>
+      <div class="row-desc">Allows host `adb root` on demand</div>
+    </div>
+    <div class="btns">
+      <button id="btn-adb-on" onclick="act('adbroot','on')">ON</button>
+      <button id="btn-adb-off" onclick="act('adbroot','off')">OFF</button>
+    </div>
+  </div>
+  <div class="row">
+    <div class="row-info">
+      <div class="row-title">ro.debuggable</div>
+      <div class="row-desc">Enables JDWP / adb root</div>
+    </div>
+    <div class="btns">
+      <button id="btn-dbg-on" onclick="act('debuggable','on')">1</button>
+      <button id="btn-dbg-off" onclick="act('debuggable','off')">0</button>
+    </div>
+  </div>
+  <div class="row">
+    <div class="row-info">
+      <div class="row-title">Play Integrity Fingerprint</div>
+      <div class="row-desc">Fetch fresh PIF fingerprint via PlayIntegrityFork</div>
+    </div>
+    <div class="btns">
+      <button class="primary" onclick="act('pif_update','')">Update PIF</button>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Pentest, MITM Proxy &amp; Services</h2>
+  <div class="row" style="flex-direction:column;align-items:stretch;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div class="row-title">HTTP Proxy (Burp / mitmproxy) <span class="pill" id="pill-proxy">off</span></div>
+      <button class="danger" onclick="act('proxy_clear','')">Clear</button>
+    </div>
+    <div class="input-row">
+      <input type="text" id="proxy-val" placeholder="192.168.1.10:8080">
+      <button class="primary" onclick="setProxy()">Set Proxy</button>
+    </div>
+  </div>
+  <div class="row">
+    <div class="row-info">
+      <div class="row-title">Conscrypt CA Store <span class="pill" id="pill-certs">—</span></div>
+      <div class="row-desc">Sync user &amp; custom MITM certs to Android 17 system store</div>
+    </div>
+    <div class="btns">
+      <button class="primary" onclick="act('certs_sync','')">Sync Now</button>
+    </div>
+  </div>
+  <div class="row">
+    <div class="row-info">
+      <div class="row-title">Frida Server <span class="pill" id="pill-frida">—</span></div>
+      <div class="row-desc" id="desc-frida">0.0.0.0:27042</div>
+    </div>
+    <div class="btns">
+      <button onclick="act('frida','start')">Start</button>
+      <button class="danger" onclick="act('frida','stop')">Stop</button>
+      <button id="btn-frida-auto" onclick="toggleFridaAuto()">Auto</button>
+    </div>
+  </div>
+  <div class="row">
+    <div class="row-info">
+      <div class="row-title">Systemless Ad-Block <span class="pill" id="pill-adblock">—</span></div>
+      <div class="row-desc">StevenBlack unified hosts over /system/etc/hosts</div>
+    </div>
+    <div class="btns">
+      <button onclick="act('adblock','on')">ON</button>
+      <button onclick="act('adblock','off')">OFF</button>
+      <button class="primary" onclick="act('adblock','update')">Update</button>
+    </div>
+  </div>
+  <div class="row">
+    <div class="row-info">
+      <div class="row-title">Shizuku Service <span class="pill" id="pill-shizuku">—</span></div>
+      <div class="row-desc">Privileged API service running as root</div>
+    </div>
+    <div class="btns">
+      <button class="primary" onclick="act('shizuku_start','')">Start</button>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Dropbear SSH &amp; Authorized Keys</h2>
+  <div class="row">
+    <div class="row-info">
+      <div class="row-title">Dropbear SSH <span class="pill" id="pill-ssh">—</span></div>
+      <div class="row-desc" id="desc-ssh">Port 2222 (pubkey auth)</div>
+    </div>
+    <div class="btns">
+      <button onclick="act('ssh','start')">Start</button>
+      <button class="danger" onclick="act('ssh','stop')">Stop</button>
+      <button id="btn-ssh-auto" onclick="toggleSshAuto()">Auto</button>
+    </div>
+  </div>
+  <div class="input-row">
+    <input type="text" id="ssh-key-in" placeholder="ssh-ed25519 AAAA... user@pc">
+    <button class="primary" onclick="addSshKey()">Add Key</button>
+  </div>
+  <div class="list-box" id="ssh-key-list"></div>
+</div>
+
+<div class="card">
+  <h2>Display DPI &amp; Resolution</h2>
+  <div class="row-desc" id="desc-display">Loading display info...</div>
+  <div class="btns" style="justify-content:flex-start;margin-top:8px;">
+    <button onclick="act('display_density','320')">320 DPI (Sharp)</button>
+    <button onclick="act('display_density','360')">360 DPI (Compact)</button>
+    <button onclick="act('display_density','420')">420 DPI (Balanced)</button>
+    <button class="danger" onclick="resetDisplay()">Reset All</button>
+  </div>
+  <div class="input-row">
+    <input type="text" id="disp-size-in" placeholder="WxH e.g. 1080x2340">
+    <button class="primary" onclick="setDisplaySize()">Set Size</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Quick Root Grant</h2>
+  <div class="row-desc">Grant permanent Magisk Superuser access to an installed package:</div>
+  <div class="input-row">
+    <input type="text" id="grant-pkg" placeholder="com.example.app">
+    <button class="primary" onclick="grantPkg()">Grant</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Magisk Modules (Tap to Toggle — Reboot to Apply)</h2>
+  <div class="list-box" id="mod-list"></div>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <h2 style="margin:0;">Boot &amp; Provisioning Log</h2>
+    <button onclick="loadLogs()">Reload</button>
+  </div>
+  <pre id="log-box">Loading logs...</pre>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const params = new URLSearchParams(location.search);
+const TOKEN = params.get("token") || "";
+const HAS_KSU = typeof window.ksu !== "undefined" && typeof window.ksu.exec === "function";
+let state = {};
+
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.style.display = "block";
+  clearTimeout(window._t);
+  window._t = setTimeout(() => { el.style.display = "none"; }, 3800);
+}
+
+function ksuExec(cmd) {
+  return new Promise((resolve, reject) => {
+    const cb = "_cb_" + Math.random().toString(36).slice(2);
+    window[cb] = (errno, stdout, stderr) => {
+      delete window[cb];
+      if (errno === 0) resolve(stdout);
+      else reject(new Error(stderr || stdout || ("exit " + errno)));
+    };
+    window.ksu.exec(cmd, "{}", cb);
+  });
+}
+
+function shQuote(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'"; }
+
+async function apiCall(action, value = "") {
+  if (HAS_KSU && !TOKEN) {
+    const map = {
+      status: "andarium-ctl status-json",
+      logs: "andarium-ctl logs 120",
+      certs_sync: "andarium-ctl certs sync",
+      shizuku_start: "andarium-ctl shizuku start",
+      pif_update: "andarium-ctl pif-update",
+      proxy_clear: "andarium-ctl proxy clear",
+      reboot: "andarium-ctl reboot",
+    };
+    let cmd = map[action];
+    if (!cmd) {
+      if (action === "proxy_set") cmd = "andarium-ctl proxy set " + shQuote(value);
+      else if (action === "display_density") cmd = "andarium-ctl display density " + shQuote(value);
+      else if (action === "display_size") cmd = "andarium-ctl display size " + shQuote(value);
+      else if (action === "module_enable") cmd = "andarium-ctl module enable " + shQuote(value);
+      else if (action === "module_disable") cmd = "andarium-ctl module disable " + shQuote(value);
+      else if (action === "ssh_addkey") cmd = "andarium-ctl ssh addkey " + shQuote(value);
+      else if (action === "ssh_delkey") cmd = "andarium-ctl ssh delkey " + shQuote(value);
+      else if (action === "frida" && value === "autostart_on") cmd = "andarium-ctl frida autostart on";
+      else if (action === "frida" && value === "autostart_off") cmd = "andarium-ctl frida autostart off";
+      else if (action === "ssh" && value === "autostart_on") cmd = "andarium-ctl ssh autostart on";
+      else if (action === "ssh" && value === "autostart_off") cmd = "andarium-ctl ssh autostart off";
+      else cmd = "andarium-ctl " + action + " " + shQuote(value);
+    }
+    const out = await ksuExec(cmd);
+    if (action === "status") return JSON.parse(out);
+    if (action === "logs") return { ok: true, logs: out };
+    return { ok: true, output: out.trim() };
+  }
+  const url = "/cgi-bin/api?token=" + encodeURIComponent(TOKEN) +
+              "&action=" + encodeURIComponent(action) +
+              "&value=" + encodeURIComponent(value);
+  const res = await fetch(url, { cache: "no-store" });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+  return data;
+}
+
+function setPill(id, text, isOn) {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.className = "pill " + (isOn ? "on" : "");
+}
+
+async function refresh() {
+  try {
+    state = await apiCall("status");
+    document.getElementById("hdr-sub").textContent =
+      "Android " + state.android + " (API " + state.sdk + ") · Linux " + state.kernel;
+    document.getElementById("st-magisk").textContent = state.magisk;
+    document.getElementById("st-selinux").textContent = state.selinux;
+    document.getElementById("st-stealth").textContent = state.stealth === "on" ? "Stealth ON" : "Dev / Root";
+    document.getElementById("st-mem").textContent = state.mem_avail_mb + " / " + state.mem_total_mb + " MB";
+
+    document.getElementById("btn-stealth-on").className = state.stealth === "on" ? "primary" : "";
+    document.getElementById("btn-stealth-off").className = state.stealth !== "on" ? "primary" : "";
+    document.getElementById("btn-se-perm").className = /permissive|0/i.test(state.selinux) ? "primary" : "";
+    document.getElementById("btn-se-enf").className = /enforcing|1/i.test(state.selinux) ? "primary" : "";
+    document.getElementById("btn-adb-on").className = state.adbroot === "1" ? "primary" : "";
+    document.getElementById("btn-adb-off").className = state.adbroot !== "1" ? "primary" : "";
+    document.getElementById("btn-dbg-on").className = state.debuggable === "1" ? "primary" : "";
+    document.getElementById("btn-dbg-off").className = state.debuggable !== "1" ? "primary" : "";
+
+    setPill("pill-proxy", state.proxy || "off", Boolean(state.proxy));
+    if (state.proxy && !document.getElementById("proxy-val").value) {
+      document.getElementById("proxy-val").value = state.proxy;
+    }
+
+    setPill("pill-frida", state.frida, state.frida === "running");
+    document.getElementById("desc-frida").textContent = state.frida_bind + " · autostart=" + (state.frida_autostart === "1" ? "ON" : "OFF");
+    document.getElementById("btn-frida-auto").className = state.frida_autostart === "1" ? "primary" : "";
+
+    setPill("pill-ssh", state.ssh, state.ssh === "running");
+    document.getElementById("desc-ssh").textContent = "Port " + state.ssh_port + " · keys=" + state.ssh_keys + " · autostart=" + (state.ssh_autostart === "1" ? "ON" : "OFF");
+    document.getElementById("btn-ssh-auto").className = state.ssh_autostart === "1" ? "primary" : "";
+
+    setPill("pill-adblock", state.adblock, state.adblock === "on");
+    setPill("pill-certs", state.certs + " (+" + state.certs_extra + ")", state.certs === "mounted");
+    setPill("pill-shizuku", state.shizuku, state.shizuku === "running");
+    document.getElementById("desc-display").textContent =
+      "Size: " + (state.display_size || "?") + " · Density: " + (state.display_density || "?");
+
+    // SSH keys list
+    const klist = document.getElementById("ssh-key-list");
+    klist.innerHTML = "";
+    (state.ssh_key_list || []).forEach(k => {
+      const div = document.createElement("div");
+      div.className = "list-item";
+      const info = document.createElement("div");
+      const top = document.createElement("b");
+      top.textContent = "#" + k.index + " " + k.type + (k.comment ? " (" + k.comment + ")" : "");
+      const sub = document.createElement("div");
+      sub.className = "sub";
+      sub.textContent = k.preview;
+      info.appendChild(top);
+      info.appendChild(sub);
+      const delBtn = document.createElement("button");
+      delBtn.className = "danger";
+      delBtn.textContent = "Remove";
+      delBtn.onclick = () => act("ssh_delkey", String(k.index));
+      div.appendChild(info);
+      div.appendChild(delBtn);
+      klist.appendChild(div);
+    });
+
+    // Magisk modules with live enable/disable toggles
+    const list = document.getElementById("mod-list");
+    list.innerHTML = "";
+    (state.modules || []).forEach(m => {
+      const div = document.createElement("div");
+      div.className = "list-item";
+      const left = document.createElement("div");
+      const title = document.createElement("b");
+      title.textContent = m.name;
+      const sub = document.createElement("div");
+      sub.className = "sub";
+      sub.textContent = m.id + (m.version ? " · " + m.version : "");
+      left.appendChild(title);
+      left.appendChild(sub);
+      const right = document.createElement("div");
+      right.className = "btns";
+      const btn = document.createElement("button");
+      btn.className = m.enabled ? "primary" : "danger";
+      btn.textContent = m.enabled ? "Active" : "Disabled";
+      if (m.id === "andarium_control") {
+        btn.disabled = true;
+      } else {
+        btn.onclick = () => act(m.enabled ? "module_disable" : "module_enable", m.id);
+      }
+      right.appendChild(btn);
+      div.appendChild(left);
+      div.appendChild(right);
+      list.appendChild(div);
+    });
+  } catch (e) {
+    document.getElementById("hdr-sub").textContent = "Error: " + e.message;
+    toast("Status error: " + e.message);
+  }
+}
+
+async function act(action, value) {
+  try {
+    toast("Running " + action + "...");
+    const r = await apiCall(action, value);
+    toast(r.output || "Done");
+    await refresh();
+  } catch (e) {
+    toast("Error: " + e.message);
+  }
+}
+
+function setProxy() {
+  const v = document.getElementById("proxy-val").value.trim();
+  if (!v.includes(":")) { toast("Enter host:port (e.g. 192.168.1.10:8080)"); return; }
+  act("proxy_set", v);
+}
+function addSshKey() {
+  const k = document.getElementById("ssh-key-in").value.trim();
+  if (!k) { toast("Paste an SSH public key first"); return; }
+  act("ssh_addkey", k).then(() => { document.getElementById("ssh-key-in").value = ""; });
+}
+function setDisplaySize() {
+  const v = document.getElementById("disp-size-in").value.trim();
+  if (!/^\d{3,4}x\d{3,4}$/.test(v)) { toast("Enter WxH (e.g. 1080x2340)"); return; }
+  act("display_size", v);
+}
+async function resetDisplay() {
+  await act("display_size", "reset");
+  await act("display_density", "reset");
+}
+function toggleFridaAuto() {
+  act("frida", state.frida_autostart === "1" ? "autostart_off" : "autostart_on");
+}
+function toggleSshAuto() {
+  act("ssh", state.ssh_autostart === "1" ? "autostart_off" : "autostart_on");
+}
+function grantPkg() {
+  const pkg = document.getElementById("grant-pkg").value.trim();
+  if (!/^[a-zA-Z0-9._]+$/.test(pkg)) { toast("Enter a valid package name"); return; }
+  act("grant", pkg);
+}
+function confirmReboot() {
+  if (confirm("Reboot the Android guest now?")) act("reboot", "");
+}
+async function loadLogs() {
+  try {
+    const r = await apiCall("logs");
+    document.getElementById("log-box").textContent = r.logs || "(empty)";
+  } catch (e) {
+    document.getElementById("log-box").textContent = "Failed to load logs: " + e.message;
+  }
+}
+
+refresh();
+loadLogs();
+</script>
+</body>
+</html>

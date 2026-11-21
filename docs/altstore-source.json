@@ -1,0 +1,47 @@
+{
+  "name": "Andarium Root Repository",
+  "subtitle": "Rooted Android 17 VM for iOS (Magisk + ReZygisk + Vector + Control Panel v3)",
+  "description": "Automated rooted builds of Andarium with Magisk v31.1, ReZygisk, Vector, and power-user tools.",
+  "identifier": "com.andarium.root.source",
+  "iconURL": "https://raw.githubusercontent.com/OWNER/Andarium-Root-IPA/main/docs/icon.png",
+  "tintColor": "#34F5A1",
+  "featuredApps": [
+    "com.andarium.root"
+  ],
+  "apps": [
+    {
+      "name": "Andarium Root",
+      "bundleIdentifier": "com.andarium.root",
+      "developerName": "Andarium Root (based on imxieyi/Kernarium)",
+      "subtitle": "Full-Root Android 17 VM on iOS (Magisk + Vector + Pentest & Stealth Suite)",
+      "localizedDescription": "Rooted Andarium v3 Ultimate Edition (Android 17 / LineageOS 24 on Linux 6.18.60): Magisk v31.1, ReZygisk, Vector (LSPosed), Control Panel v3 (WebUI + localhost:8787 with HTTP Proxy, DPI/Resolution, SSH Key Manager & live Module toggles), Stealth Mode (PlayIntegrityFork + TrickyStore + Zygisk-Assistant), Frida Server, strace/socat/sqlite3/jq/tcpdump, Android 17 Conscrypt CA cert injection, TrustMeAlready, Systemless Ad-Block, Dropbear SSH, Termux, Material Files, microG, Aurora Store, Obtainium, App Manager, Shizuku (auto-started), and Neo Backup.\n\nSHA-256: 89ec5dc656e938841c0327319386fb216c965b960c6d817fa835da1f8a48f204",
+      "iconURL": "https://raw.githubusercontent.com/OWNER/Andarium-Root-IPA/main/docs/icon.png",
+      "tintColor": "#34F5A1",
+      "category": "utilities",
+      "versions": [
+        {
+          "version": "1.0.15",
+          "buildVersion": "15",
+          "date": "2026-11-21T16:25:52Z",
+          "localizedDescription": "Rooted Andarium v3 Ultimate Edition (Android 17 / LineageOS 24 on Linux 6.18.60): Magisk v31.1, ReZygisk, Vector (LSPosed), Control Panel v3 (WebUI + localhost:8787 with HTTP Proxy, DPI/Resolution, SSH Key Manager & live Module toggles), Stealth Mode (PlayIntegrityFork + TrickyStore + Zygisk-Assistant), Frida Server, strace/socat/sqlite3/jq/tcpdump, Android 17 Conscrypt CA cert injection, TrustMeAlready, Systemless Ad-Block, Dropbear SSH, Termux, Material Files, microG, Aurora Store, Obtainium, App Manager, Shizuku (auto-started), and Neo Backup.\n\nSHA-256: 89ec5dc656e938841c0327319386fb216c965b960c6d817fa835da1f8a48f204",
+          "downloadURL": "https://github.com/OWNER/Andarium-Root-IPA/releases/download/root-1.0b15-release/Andarium-Root-1.0-15.ipa",
+          "size": 1354774531,
+          "minOSVersion": "17.0"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [
+          "com.apple.developer.kernel.increased-memory-limit",
+          "com.apple.developer.kernel.extended-virtual-addressing"
+        ],
+        "privacy": {
+          "NSCameraUsageDescription": "Andarium uses the camera only when you turn on Camera inside the VM.",
+          "NSLocalNetworkUsageDescription": "Used for guest networking, ADB over network, and Dropbear SSH.",
+          "NSLocationWhenInUseUsageDescription": "Shares location only when Location is turned on inside the VM.",
+          "NSMicrophoneUsageDescription": "Records audio only when Microphone is turned on inside the VM."
+        }
+      }
+    }
+  ],
+  "news": []
+}

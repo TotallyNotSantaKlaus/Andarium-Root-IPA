@@ -1,0 +1,6 @@
+# Rename this file to `hosts` (without .example) to append custom entries
+# to Android's systemless /etc/hosts at build time.
+#
+# Example:
+# 192.168.1.50 dev.local
+# 0.0.0.0      telemetry.example.com

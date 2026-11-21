@@ -1,0 +1,64 @@
+#!/system/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
+# andarium-termux-setup — Configures Termux & root shell aliases for Andarium Root.
+# Usage:
+#   andarium-termux-setup                (installs shell aliases & helper wrappers)
+#   andarium-termux-setup --install-pkgs (also installs git, python, openssh, vim, htop, tmux, nmap in Termux)
+
+ODM_ROOT="/odm/andarium-root"
+TERMUX_HOME="/data/data/com.termux/files/home"
+TERMUX_USR="/data/data/com.termux/files/usr"
+RC_SRC="$ODM_ROOT/scripts/andarium-shell-rc.sh"
+
+echo "=== Andarium Root Termux & Shell Setup ==="
+
+# 1. Install root profile into /data/adb/andarium/profile
+if [ "$(id -u)" = "0" ]; then
+    mkdir -p /data/adb/andarium
+    cp -f "$RC_SRC" /data/adb/andarium/profile 2>/dev/null || true
+    chmod 0644 /data/adb/andarium/profile 2>/dev/null || true
+    echo "[ok] installed root shell profile: /data/adb/andarium/profile"
+    echo "     (source with: . /data/adb/andarium/profile)"
+fi
+
+# 2. Wire Termux ~/.bashrc with convenient root wrappers (`rsu`, `ctl`, `andarium-ctl`)
+if [ -d "$TERMUX_HOME" ]; then
+    BASHRC="$TERMUX_HOME/.bashrc"
+    touch "$BASHRC"
+    if ! grep -q '# === Andarium Root Helpers ===' "$BASHRC" 2>/dev/null; then
+        cat <<'EOF' >> "$BASHRC"
+
+# === Andarium Root Helpers ===
+alias ctl='su -c andarium-ctl'
+alias rsu='su -c "ENV=/data/adb/andarium/profile /system/bin/sh"'
+alias logs='su -c "andarium-ctl logs 80"'
+alias frida-on='su -c "andarium-ctl frida start"'
+alias frida-off='su -c "andarium-ctl frida stop"'
+alias ssh-on='su -c "andarium-ctl ssh start"'
+alias ssh-off='su -c "andarium-ctl ssh stop"'
+alias stealth-on='su -c "andarium-ctl stealth on"'
+alias stealth-off='su -c "andarium-ctl stealth off"'
+alias certs-sync='su -c "andarium-ctl certs sync"'
+EOF
+        # Match Termux app UID ownership if running as root
+        if [ "$(id -u)" = "0" ]; then
+            tuid="$(stat -c %u "$TERMUX_HOME" 2>/dev/null || true)"
+            [ -n "$tuid" ] && chown "$tuid:$tuid" "$BASHRC" 2>/dev/null || true
+        fi
+        echo "[ok] added Andarium Root helpers to $BASHRC"
+    else
+        echo "[ok] Andarium Root helpers already present in $BASHRC"
+    fi
+else
+    echo "[note] Open Termux once first to initialize its home directory, then re-run andarium-termux-setup."
+fi
+
+# 3. Optional Termux package bootstrap (when run inside Termux with --install-pkgs)
+if [ "$1" = "--install-pkgs" ]; then
+    if [ -x "$TERMUX_USR/bin/pkg" ] && [ "$(id -u)" != "0" ]; then
+        echo "[info] Installing Termux power-user packages..."
+        pkg update -y && pkg install -y git python openssh vim htop tmux nmap
+    else
+        echo "[note] Run 'andarium-termux-setup --install-pkgs' inside Termux (non-root shell) to install Termux packages."
+    fi
+fi

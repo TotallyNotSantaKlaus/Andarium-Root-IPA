@@ -1,0 +1,6 @@
+id=andarium_control
+name=Andarium Root Control
+version=v3.0
+versionCode=300
+author=Andarium Root
+description=On-device Control Panel v3 (WebUI + localhost:8787): Stealth Mode, SELinux, HTTP Proxy, Conscrypt CA Injection, Systemless Ad-Block, Frida, Dropbear SSH + Key Manager, Display DPI/Size & Module Manager.

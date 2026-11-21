@@ -1,0 +1,260 @@
+#!/system/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Token-authenticated, strictly allowlisted CGI API for Andarium Root Control Panel (v3).
+
+CTL="/odm/andarium-root/scripts/andarium-ctl"
+TOKEN_FILE="/data/adb/andarium/run/webui.token"
+BB="/data/adb/magisk/busybox"
+[ -x "$BB" ] || BB="/odm/andarium-root/magisk-bin/busybox"
+
+send_json() {
+    status="$1"
+    body="$2"
+    printf 'Status: %s\r\nContent-Type: application/json; charset=utf-8\r\nCache-Control: no-store\r\n\r\n%s\n' "$status" "$body"
+}
+
+json_esc() {
+    printf '%s' "$1" | "$BB" sed 's/\\/\\\\/g; s/"/\\"/g; s/\r//g' | "$BB" awk 'BEGIN{ORS="\\n"} {print}' | "$BB" sed 's/\\n$//'
+}
+
+get_param() {
+    key="$1"
+    old_ifs="$IFS"
+    IFS='&'
+    for pair in $QUERY_STRING; do
+        k="${pair%%=*}"
+        v="${pair#*=}"
+        if [ "$k" = "$key" ]; then
+            IFS="$old_ifs"
+            "$BB" httpd -d "$v"
+            return 0
+        fi
+    done
+    IFS="$old_ifs"
+    return 1
+}
+
+TOKEN="$(get_param token || true)"
+EXPECTED=""
+[ -f "$TOKEN_FILE" ] && EXPECTED="$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '\r\n ')"
+
+if [ -z "$EXPECTED" ] || [ "$TOKEN" != "$EXPECTED" ]; then
+    send_json "403 Forbidden" '{"ok":false,"error":"unauthorized: invalid or missing session token"}'
+    exit 0
+fi
+
+ACTION="$(get_param action || echo status)"
+VAL="$(get_param value || true)"
+
+case "$ACTION" in
+    status)
+        out="$("$CTL" status-json 2>&1)"
+        send_json "200 OK" "$out"
+        ;;
+    logs)
+        out="$("$CTL" logs 120 2>&1)"
+        send_json "200 OK" "{\"ok\":true,\"logs\":\"$(json_esc "$out")\"}"
+        ;;
+    selinux)
+        case "$VAL" in
+            permissive|enforcing)
+                out="$("$CTL" selinux "$VAL" 2>&1)"
+                send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+                ;;
+            *) send_json "400 Bad Request" '{"ok":false,"error":"invalid selinux mode"}' ;;
+        esac
+        ;;
+    stealth)
+        case "$VAL" in
+            on|off)
+                out="$("$CTL" stealth "$VAL" 2>&1)"
+                send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+                ;;
+            *) send_json "400 Bad Request" '{"ok":false,"error":"invalid stealth value"}' ;;
+        esac
+        ;;
+    adbroot)
+        case "$VAL" in
+            on|off)
+                out="$("$CTL" adbroot "$VAL" 2>&1)"
+                send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+                ;;
+            *) send_json "400 Bad Request" '{"ok":false,"error":"invalid adbroot value"}' ;;
+        esac
+        ;;
+    debuggable)
+        case "$VAL" in
+            on|off)
+                out="$("$CTL" debuggable "$VAL" 2>&1)"
+                send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+                ;;
+            *) send_json "400 Bad Request" '{"ok":false,"error":"invalid debuggable value"}' ;;
+        esac
+        ;;
+    proxy_set)
+        case "$VAL" in
+            ''|*[!a-zA-Z0-9.:_-]*)
+                send_json "400 Bad Request" '{"ok":false,"error":"invalid proxy host:port"}'
+                ;;
+            *:*)
+                out="$("$CTL" proxy set "$VAL" 2>&1)"
+                send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+                ;;
+            *)
+                send_json "400 Bad Request" '{"ok":false,"error":"proxy must be host:port"}'
+                ;;
+        esac
+        ;;
+    proxy_clear)
+        out="$("$CTL" proxy clear 2>&1)"
+        send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+        ;;
+    display_density)
+        case "$VAL" in
+            reset)
+                out="$("$CTL" display density reset 2>&1)"
+                send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+                ;;
+            ''|*[!0-9]*)
+                send_json "400 Bad Request" '{"ok":false,"error":"invalid density value"}'
+                ;;
+            *)
+                out="$("$CTL" display density "$VAL" 2>&1)"
+                if [ $? -eq 0 ]; then
+                    send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+                else
+                    send_json "400 Bad Request" "{\"ok\":false,\"error\":\"$(json_esc "$out")\"}"
+                fi
+                ;;
+        esac
+        ;;
+    display_size)
+        if [ "$VAL" = "reset" ] || printf '%s' "$VAL" | "$BB" grep -Eq '^[0-9]{3,4}x[0-9]{3,4}$'; then
+            out="$("$CTL" display size "$VAL" 2>&1)"
+            send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+        else
+            send_json "400 Bad Request" '{"ok":false,"error":"invalid size (expected WxH or reset)"}'
+        fi
+        ;;
+    module_enable|module_disable)
+        case "$VAL" in
+            ''|'.'|'..'|*/*|*[!a-zA-Z0-9._-]*)
+                send_json "400 Bad Request" '{"ok":false,"error":"invalid module id"}'
+                ;;
+            andarium_control)
+                if [ "$ACTION" = "module_disable" ]; then
+                    send_json "400 Bad Request" '{"ok":false,"error":"cannot disable andarium_control from WebUI"}'
+                else
+                    out="$("$CTL" module enable "$VAL" 2>&1)"
+                    send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+                fi
+                ;;
+            *)
+                sub="enable"
+                [ "$ACTION" = "module_disable" ] && sub="disable"
+                out="$("$CTL" module "$sub" "$VAL" 2>&1)"
+                if [ $? -eq 0 ]; then
+                    send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+                else
+                    send_json "400 Bad Request" "{\"ok\":false,\"error\":\"$(json_esc "$out")\"}"
+                fi
+                ;;
+        esac
+        ;;
+    adblock)
+        case "$VAL" in
+            on|off|update)
+                out="$("$CTL" adblock "$VAL" 2>&1)"
+                send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+                ;;
+            *) send_json "400 Bad Request" '{"ok":false,"error":"invalid adblock action"}' ;;
+        esac
+        ;;
+    frida)
+        case "$VAL" in
+            start|stop)
+                out="$("$CTL" frida "$VAL" 2>&1)"
+                send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+                ;;
+            autostart_on)
+                out="$("$CTL" frida autostart on 2>&1)"
+                send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+                ;;
+            autostart_off)
+                out="$("$CTL" frida autostart off 2>&1)"
+                send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+                ;;
+            *) send_json "400 Bad Request" '{"ok":false,"error":"invalid frida action"}' ;;
+        esac
+        ;;
+    ssh)
+        case "$VAL" in
+            start|stop)
+                out="$("$CTL" ssh "$VAL" 2>&1)"
+                send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+                ;;
+            autostart_on)
+                out="$("$CTL" ssh autostart on 2>&1)"
+                send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+                ;;
+            autostart_off)
+                out="$("$CTL" ssh autostart off 2>&1)"
+                send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+                ;;
+            *) send_json "400 Bad Request" '{"ok":false,"error":"invalid ssh action"}' ;;
+        esac
+        ;;
+    ssh_addkey)
+        out="$("$CTL" ssh addkey "$VAL" 2>&1)"
+        if [ $? -eq 0 ]; then
+            send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+        else
+            send_json "400 Bad Request" "{\"ok\":false,\"error\":\"$(json_esc "$out")\"}"
+        fi
+        ;;
+    ssh_delkey)
+        case "$VAL" in
+            ''|*[!0-9]*)
+                send_json "400 Bad Request" '{"ok":false,"error":"invalid key index"}'
+                ;;
+            *)
+                out="$("$CTL" ssh delkey "$VAL" 2>&1)"
+                if [ $? -eq 0 ]; then
+                    send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+                else
+                    send_json "400 Bad Request" "{\"ok\":false,\"error\":\"$(json_esc "$out")\"}"
+                fi
+                ;;
+        esac
+        ;;
+    certs_sync)
+        out="$("$CTL" certs sync 2>&1)"
+        send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+        ;;
+    shizuku_start)
+        out="$("$CTL" shizuku start 2>&1)"
+        send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+        ;;
+    pif_update)
+        out="$("$CTL" pif-update 2>&1)"
+        send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+        ;;
+    grant)
+        case "$VAL" in
+            ''|*[!a-zA-Z0-9._]*)
+                send_json "400 Bad Request" '{"ok":false,"error":"invalid package name"}'
+                ;;
+            *)
+                out="$("$CTL" grant "$VAL" 2>&1)"
+                send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+                ;;
+        esac
+        ;;
+    reboot)
+        out="$("$CTL" reboot 2>&1)"
+        send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+        ;;
+    *)
+        send_json "400 Bad Request" '{"ok":false,"error":"unknown action"}'
+        ;;
+esac

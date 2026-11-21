@@ -1,0 +1,23 @@
+# Local download cache, build artifacts & staging
+.cache/
+work/
+dist/*.ipa
+dist/*.sha256
+dist/SHA256SUMS.txt
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+
+# Protect private user drop-ins in custom/ from accidental git push
+custom/authorized_keys
+custom/hosts
+custom/apks/*.apk
+custom/modules/*.zip
+custom/certs/*.pem
+custom/certs/*.crt
+custom/certs/*.cer
+custom/certs/*.der
+custom/certs/*.0
+custom/scripts/post-fs-data.d/*.sh
+custom/scripts/service.d/*.sh

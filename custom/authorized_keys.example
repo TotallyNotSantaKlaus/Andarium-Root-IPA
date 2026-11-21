@@ -1,0 +1,3 @@
+# Rename this file to `authorized_keys` (without .example) and paste your
+# ssh-ed25519 / ssh-rsa public keys (one per line) to pre-authorize root SSH
+# access into Andarium Root on port 2222.

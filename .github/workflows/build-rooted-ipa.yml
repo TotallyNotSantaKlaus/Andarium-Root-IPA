@@ -1,0 +1,225 @@
+name: Build & Publish Andarium Root IPA
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/altstore-source.json"
+      - "README.md"
+  pull_request:
+    branches: [main]
+  schedule:
+    # Check daily at 06:00 UTC for new imxieyi/Kernarium Andarium IPA releases
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: "Optional imxieyi/Kernarium release tag (leave empty for latest)"
+        required: false
+        default: ""
+      selinux:
+        description: "Default boot SELinux mode (Ultimate flavor)"
+        type: choice
+        options:
+          - permissive
+          - enforcing
+        default: permissive
+      bundle_id:
+        description: "Base iOS CFBundleIdentifier"
+        required: false
+        default: "com.andarium.root"
+      display_name:
+        description: "Base iOS CFBundleDisplayName"
+        required: false
+        default: "Andarium Root"
+      force_rebuild:
+        description: "Rebuild even if this upstream tag is already published"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Regression & Security Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y erofs-utils openssl
+      - name: Run Python compile checks & test_builder.py
+        run: |
+          python3 -m py_compile scripts/build_rooted_ipa.py scripts/verify_rooted_ipa.py scripts/live_audit.py scripts/generate_altstore_source.py scripts/test_builder.py
+          python3 scripts/test_builder.py
+
+  build-and-release:
+    name: Build & Publish Ultimate + Lite IPAs
+    needs: test
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies (erofs-utils with zstd, openssl)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y erofs-utils openssl curl jq
+          if ! mkfs.erofs --help 2>&1 | grep -q zstd; then
+            echo "System erofs-utils lacks zstd support; building erofs-utils 1.8.10 with libzstd..."
+            sudo apt-get install -y build-essential autoconf automake libtool pkg-config uuid-dev liblz4-dev libzstd-dev zlib1g-dev
+            curl -fL https://git.kernel.org/pub/scm/linux/kernel/git/xiang/erofs-utils.git/snapshot/erofs-utils-1.8.10.tar.gz -o /tmp/erofs-utils.tar.gz
+            tar -xzf /tmp/erofs-utils.tar.gz -C /tmp
+            cd /tmp/erofs-utils-1.8.10
+            ./autogen.sh
+            ./configure --enable-lz4 --with-libzstd --prefix=/usr/local
+            make -j"$(nproc)"
+            sudo make install
+            echo "/usr/local/bin" >> "$GITHUB_PATH"
+          fi
+
+      - name: Resolve latest upstream Andarium release from imxieyi/Kernarium
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQ_TAG: ${{ github.event.inputs.upstream_tag }}
+          FORCE: ${{ github.event.inputs.force_rebuild }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+
+          req_tag = os.environ.get("REQ_TAG", "").strip()
+          url = (
+              f"https://api.github.com/repos/imxieyi/Kernarium/releases/tags/{req_tag}"
+              if req_tag
+              else "https://api.github.com/repos/imxieyi/Kernarium/releases/latest"
+          )
+          headers = {"User-Agent": "Andarium-Root-CI/3.0"}
+          if tok := os.environ.get("GH_TOKEN"):
+              headers["Authorization"] = f"Bearer {tok}"
+
+          rel = json.loads(urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=30).read())
+          tag = rel["tag_name"]
+          ipa_assets = [a for a in rel.get("assets", []) if a["name"].startswith("Andarium-") and a["name"].endswith(".ipa")]
+          if not ipa_assets:
+              raise SystemExit(f"No Andarium-*.ipa asset found in release {tag}")
+          asset = ipa_assets[0]
+          root_tag = f"root-{tag}"
+
+          already = False
+          if os.environ.get("FORCE", "false").lower() != "true":
+              repo = os.environ["GITHUB_REPOSITORY"]
+              check_url = f"https://api.github.com/repos/{repo}/releases/tags/{root_tag}"
+              try:
+                  urllib.request.urlopen(urllib.request.Request(check_url, headers=headers), timeout=15)
+                  already = True
+              except Exception:
+                  already = False
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"tag={tag}\n")
+              out.write(f"root_tag={root_tag}\n")
+              out.write(f"ipa_name={asset['name']}\n")
+              out.write(f"ipa_url={asset['browser_download_url']}\n")
+              out.write(f"skip={'true' if already else 'false'}\n")
+          print(f"Upstream: tag={tag} asset={asset['name']} skip={already}")
+          PY
+
+      - name: Download upstream base IPA
+        if: steps.upstream.outputs.skip != 'true'
+        run: |
+          mkdir -p .cache
+          curl -fL --retry 3 -o ".cache/${{ steps.upstream.outputs.ipa_name }}" "${{ steps.upstream.outputs.ipa_url }}"
+
+      - name: Build and verify Ultimate + Lite IPAs
+        if: steps.upstream.outputs.skip != 'true'
+        id: build
+        run: |
+          BASE_NAME="${{ steps.upstream.outputs.ipa_name }}"
+          ULT_NAME="${BASE_NAME/Andarium-/Andarium-Root-}"
+          LITE_NAME="${BASE_NAME/Andarium-/Andarium-Root-Lite-}"
+          ULT_PATH="dist/${ULT_NAME}"
+          LITE_PATH="dist/${LITE_NAME}"
+          BID="${{ github.event.inputs.bundle_id || 'com.andarium.root' }}"
+          DNAME="${{ github.event.inputs.display_name || 'Andarium Root' }}"
+
+          python3 scripts/build_rooted_ipa.py \
+            --profile ultimate \
+            --base-ipa ".cache/${BASE_NAME}" \
+            --output "${ULT_PATH}" \
+            --bundle-id "${BID}" \
+            --display-name "${DNAME}" \
+            --selinux "${{ github.event.inputs.selinux || 'permissive' }}"
+
+          python3 scripts/build_rooted_ipa.py \
+            --profile lite \
+            --base-ipa ".cache/${BASE_NAME}" \
+            --output "${LITE_PATH}" \
+            --bundle-id "${BID}.lite" \
+            --display-name "${DNAME} Lite"
+
+          ULT_SIZE=$(stat -c %s "${ULT_PATH}")
+          ULT_SHA=$(sha256sum "${ULT_PATH}" | awk '{print $1}')
+          LITE_SIZE=$(stat -c %s "${LITE_PATH}")
+          LITE_SHA=$(sha256sum "${LITE_PATH}" | awk '{print $1}')
+          printf '%s  %s\n%s  %s\n' "${ULT_SHA}" "${ULT_NAME}" "${LITE_SHA}" "${LITE_NAME}" > "dist/SHA256SUMS.txt"
+
+          {
+            echo "ult_name=${ULT_NAME}"
+            echo "ult_path=${ULT_PATH}"
+            echo "ult_size=${ULT_SIZE}"
+            echo "ult_sha=${ULT_SHA}"
+            echo "lite_name=${LITE_NAME}"
+            echo "lite_path=${LITE_PATH}"
+            echo "lite_size=${LITE_SIZE}"
+            echo "lite_sha=${LITE_SHA}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        if: steps.upstream.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.upstream.outputs.root_tag }}
+          name: "Andarium Root (${{ steps.upstream.outputs.tag }})"
+          body: |
+            Automated rooted builds based on upstream `imxieyi/Kernarium` release `${{ steps.upstream.outputs.tag }}`.
+            Both flavors passed full independent multi-layer verification (`verify_rooted_ipa.py`).
+
+            - **Ultimate** (`${{ steps.build.outputs.ult_name }}`): `${{ steps.build.outputs.ult_size }}` bytes — SHA-256 `${{ steps.build.outputs.ult_sha }}`
+            - **Lite** (`${{ steps.build.outputs.lite_name }}`): `${{ steps.build.outputs.lite_size }}` bytes — SHA-256 `${{ steps.build.outputs.lite_sha }}`
+          files: |
+            ${{ steps.build.outputs.ult_path }}
+            ${{ steps.build.outputs.lite_path }}
+            dist/SHA256SUMS.txt
+
+      - name: Update AltStore / SideStore / Feather source.json (Ultimate + Lite)
+        if: steps.upstream.outputs.skip != 'true'
+        run: |
+          VER_RAW="${{ steps.build.outputs.ult_name }}"
+          VER_NUM=$(echo "$VER_RAW" | sed -E 's/Andarium-Root-([0-9.]+)-([0-9]+)\.ipa/\1.\2/')
+          BUILD_NUM=$(echo "$VER_RAW" | sed -E 's/Andarium-Root-([0-9.]+)-([0-9]+)\.ipa/\2/')
+          ULT_URL="https://github.com/${{ github.repository }}/releases/download/${{ steps.upstream.outputs.root_tag }}/${{ steps.build.outputs.ult_name }}"
+          LITE_URL="https://github.com/${{ github.repository }}/releases/download/${{ steps.upstream.outputs.root_tag }}/${{ steps.build.outputs.lite_name }}"
+
+          python3 scripts/generate_altstore_source.py \
+            --output docs/altstore-source.json \
+            --repo "${{ github.repository }}" \
+            --version "${VER_NUM}" \
+            --build-version "${BUILD_NUM}" \
+            --bundle-id "${{ github.event.inputs.bundle_id || 'com.andarium.root' }}" \
+            --display-name "${{ github.event.inputs.display_name || 'Andarium Root' }}" \
+            --ipa-size "${{ steps.build.outputs.ult_size }}" \
+            --download-url "${ULT_URL}" \
+            --sha256 "${{ steps.build.outputs.ult_sha }}" \
+            --lite-size "${{ steps.build.outputs.lite_size }}" \
+            --lite-url "${LITE_URL}" \
+            --lite-sha256 "${{ steps.build.outputs.lite_sha }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/altstore-source.json
+          git diff --cached --quiet || git commit -m "chore: update altstore-source.json for ${{ steps.upstream.outputs.root_tag }}"
+          git push

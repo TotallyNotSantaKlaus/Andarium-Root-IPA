@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Andarium Root init overlay — injected into /system/etc/init/hw/init.rc
+# immediately ahead of Magisk's own triggers by magiskinit.
+
+on post-fs-data
+    exec u:r:magisk:s0 0 0 -- /system/bin/sh ${MAGISKTMP}/andarium_early_init.sh ${MAGISKTMP}
+
+# Restore the userdebug/eng adbd root restart triggers omitted from user builds.
+# adbd still starts as shell by default so Andarium's built-in iOS features
+# (Install APK, File Browser, Add to Home Screen, Screen Reader) stay intact,
+# while `adb root` and `adb unroot` switch privileges cleanly on demand.
+on property:service.adb.root=1
+    restart adbd
+
+on property:service.adb.root=0
+    restart adbd
+
+on property:sys.boot_completed=1
+    exec_background u:r:magisk:s0 0 0 -- /system/bin/sh /odm/andarium-root/scripts/andarium_boot_complete.sh ${MAGISKTMP}

@@ -1,0 +1,4 @@
+# Optional list of custom package names to pre-grant permanent Magisk root on first boot.
+# One package name per line; lines starting with # are ignored.
+# Example:
+# com.example.myroottool

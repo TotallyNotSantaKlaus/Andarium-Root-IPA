@@ -1,0 +1,265 @@
+{
+  "schema_version": 2,
+  "base_ipa": {
+    "name": "Andarium-1.0-15.ipa",
+    "version": "1.0-15",
+    "release_tag": "1.0b15-release",
+    "url": "https://github.com/imxieyi/Kernarium/releases/download/1.0b15-release/Andarium-1.0-15.ipa",
+    "sha256": "88327002e554190a6e4e084265bc69a1e097d52352824e5808eb28042b341ddc",
+    "size": 1061900449
+  },
+  "magisk": {
+    "name": "Magisk-v31.1.apk",
+    "version": "31.1",
+    "version_code": 31100,
+    "package": "com.topjohnwu.magisk",
+    "url": "https://github.com/topjohnwu/Magisk/releases/download/v31.1/Magisk-v31.1.apk",
+    "sha256": "89cefac0a318afa39fb3880c45c87b036c05bc1ebf02a7a715b7f8d7c26ac6e7",
+    "size": 10679283
+  },
+  "modules": {
+    "rezygisk": {
+      "name": "ReZygisk-v1.0.0-release.zip",
+      "id": "rezygisk",
+      "version": "v1.0.0",
+      "group": "core",
+      "url": "https://github.com/PerformanC/ReZygisk/releases/download/v1.0.0/ReZygisk-v1.0.0-release.zip",
+      "sha256": "7904649b8dcaf2b060c3432df4fee302aeb1258da199d2b425335e82d49510e6",
+      "size": 506334
+    },
+    "vector": {
+      "name": "Vector-v2.2-3119-Release.zip",
+      "id": "zygisk_vector",
+      "version": "v2.2-canary-3119",
+      "group": "core",
+      "url": "https://github.com/JingMatrix/Vector/releases/download/canary-3119/Vector-v2.2-3119-Release.zip",
+      "sha256": "31c83bc75837e3282f74f0d3228cb683461e68b578af728ad211e2eee9fcafc0",
+      "size": 7458120
+    },
+    "playintegrityfork": {
+      "name": "PlayIntegrityFork-v19.zip",
+      "id": "playintegrityfix",
+      "version": "v19",
+      "group": "stealth",
+      "url": "https://github.com/osm0sis/PlayIntegrityFork/releases/download/v19/PlayIntegrityFork-v19.zip",
+      "sha256": "83b4d5f32743805c5b5a69361d73b8ab9c095325e24f20711afa1abea837b58f",
+      "size": 341951
+    },
+    "trickystore": {
+      "name": "TrickyStore-v1.4.1.zip",
+      "id": "tricky_store",
+      "version": "v1.4.1",
+      "group": "stealth",
+      "url": "https://github.com/5ec1cff/TrickyStore/releases/download/1.4.1/Tricky-Store-v1.4.1-245-72b2e84-release.zip",
+      "sha256": "2f5e73fcba0e4e43b6e96b38f333cbe394873e3a81cf8fe1b831c2fbd6c46ea9",
+      "size": 2840600
+    },
+    "zygisk_assistant": {
+      "name": "Zygisk-Assistant-v2.1.4.zip",
+      "id": "zygisk-assistant",
+      "version": "v2.1.4",
+      "group": "stealth",
+      "url": "https://github.com/snake-4/Zygisk-Assistant/releases/download/v2.1.4/Zygisk-Assistant-v2.1.4-1013f8a-release.zip",
+      "sha256": "9eca30a269dc676a66f67a9339185dee55cccd47dc1fc8eeea5416124626d67a",
+      "size": 392961
+    }
+  },
+  "tools": {
+    "frida_server": {
+      "name": "frida-server-17.27.4-android-arm64.xz",
+      "version": "17.27.4",
+      "group": "pentest",
+      "url": "https://github.com/frida/frida/releases/download/17.27.4/frida-server-17.27.4-android-arm64.xz",
+      "sha256": "a2007a0f3a8bcbbc3ee165b5d7904970a59b2a769310d751d68cfa405145432f",
+      "size": 24700332
+    },
+    "dropbear": {
+      "name": "dropbear-2026.94-aarch64-android.zip",
+      "version": "2026.94",
+      "group": "network",
+      "url": "https://github.com/ribbons/android-dropbear/releases/download/DROPBEAR_2026.94/dropbear-aarch64-linux-android.zip",
+      "sha256": "eab76f7388c45456ab8818ae79e1909d27baf83870b51d42fcd5dc9f7ad1b9c9",
+      "size": 479600
+    },
+    "stevenblack_hosts": {
+      "name": "stevenblack-hosts-3.16.131.txt",
+      "version": "3.16.131",
+      "group": "network",
+      "url": "https://raw.githubusercontent.com/StevenBlack/hosts/3.16.131/hosts",
+      "sha256": "a596c1301ff515f441fb862227ad7eacdb9ded28536905297b03925b45c74f7d",
+      "size": 2328985
+    },
+    "strace": {
+      "name": "strace-v2-android.zip",
+      "version": "v2",
+      "group": "pentest",
+      "url": "https://github.com/evdenis/strace/releases/download/v2/strace-v2.zip",
+      "sha256": "42a2f5439dd6a734b97a5dd72cd32651c28dcc369d62bb78d8a2323209225f86",
+      "size": 3939215
+    },
+    "socat": {
+      "name": "socat-1.7.4.4-aarch64",
+      "version": "1.7.4.4",
+      "group": "pentest",
+      "url": "https://github.com/ernw/static-toolbox/releases/download/socat-v1.7.4.4/socat-1.7.4.4-aarch64",
+      "sha256": "758f023d9a27ae3b7f5f633ef41bed65b812af0dd86b4afede37925e405ddc3d",
+      "size": 3114296
+    },
+    "sqlite3": {
+      "name": "sqlite3-magisk-2026.07.15.zip",
+      "version": "3.53.3",
+      "group": "pentest",
+      "url": "https://github.com/rojenzaman/sqlite3-magisk-module/releases/download/2026.07.15/SQLite-v3.53.3-for-magisk.multi-arch.zip",
+      "sha256": "a7c00ae5c6b15d6c20adf5594b496503e88d19189e96e688bd26ec479a44e87c",
+      "size": 2791429
+    },
+    "jq": {
+      "name": "jq-1.8.2-linux-arm64",
+      "version": "1.8.2",
+      "group": "pentest",
+      "url": "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-linux-arm64",
+      "sha256": "8b85c817833814ddca00a144c33705546355afccf0cf39b188f3cdb48b852309",
+      "size": 1797688
+    },
+    "tcpdump": {
+      "name": "tcpdump-aarch64-static",
+      "version": "static-d6fb56ee",
+      "group": "pentest",
+      "url": "https://github.com/tiiuae/aarch64_bin_builder/releases/download/release-d6fb56ee/tcpdump",
+      "sha256": "9b90df8e4cc38a361dbb811661cdee5e1f9f0a70aaf2b5b4d0b50f856230c0c9",
+      "size": 1216560
+    }
+  },
+  "apks": {
+    "termux": {
+      "name": "termux-v0.119.0-beta.3-arm64.apk",
+      "install_name": "02-termux.apk",
+      "package": "com.termux",
+      "group": "apps",
+      "grant_root": true,
+      "manage_storage": true,
+      "battery_whitelist": true,
+      "install_packages": false,
+      "url": "https://github.com/termux/termux-app/releases/download/v0.119.0-beta.3/termux-app_v0.119.0-beta.3%2Bapt-android-7-github-debug_arm64-v8a.apk",
+      "sha256": "3bb969df2400d884ccb929b7d79cc76861f291c98942c401e12408d734a460f3",
+      "size": 35738948
+    },
+    "material_files": {
+      "name": "MaterialFiles-v1.7.5.apk",
+      "install_name": "03-material-files.apk",
+      "package": "me.zhanghai.android.files",
+      "group": "apps",
+      "grant_root": true,
+      "manage_storage": true,
+      "battery_whitelist": false,
+      "install_packages": true,
+      "url": "https://github.com/zhanghai/MaterialFiles/releases/download/v1.7.5/app-release-fdroid.apk",
+      "sha256": "2fe900bf43d725b655008d438f5ca46d0da0f301e3784403b5b96c3fc2df6e8a",
+      "size": 10944578
+    },
+    "microg_gms": {
+      "name": "microg-gms-252432036.apk",
+      "install_name": "04-microg-gms.apk",
+      "package": "com.google.android.gms",
+      "group": "microg",
+      "grant_root": false,
+      "manage_storage": false,
+      "battery_whitelist": true,
+      "install_packages": true,
+      "url": "https://github.com/microg/GmsCore/releases/download/v0.3.18.252432/com.google.android.gms-252432036.apk",
+      "sha256": "1094fa60ace2367ac52bd08d1bd4f33fa8144ba930e355121b28234b8ebbf382",
+      "size": 108520063
+    },
+    "microg_vending": {
+      "name": "microg-vending-84022636.apk",
+      "install_name": "05-microg-vending.apk",
+      "package": "com.android.vending",
+      "group": "microg",
+      "grant_root": false,
+      "manage_storage": false,
+      "battery_whitelist": true,
+      "install_packages": true,
+      "url": "https://github.com/microg/GmsCore/releases/download/v0.3.18.252432/com.android.vending-84022636.apk",
+      "sha256": "3f1bde2f72bca746fbb53b61a32c2a85fcb026f886ee96d6fe9a05de9a6c6d5b",
+      "size": 4212484
+    },
+    "aurora_store": {
+      "name": "AuroraStore-4.8.4.apk",
+      "install_name": "06-aurora-store.apk",
+      "package": "com.aurora.store",
+      "group": "power_apps",
+      "grant_root": false,
+      "manage_storage": true,
+      "battery_whitelist": false,
+      "install_packages": true,
+      "url": "https://auroraoss.com/downloads/AuroraStore/Release/AuroraStore-4.8.4.apk",
+      "sha256": "fd9c75d90d0f4a7c132b9b4a5a2cf1992a45e03b8d8ff988b7dcfbc0db2c4d11",
+      "size": 9360088
+    },
+    "obtainium": {
+      "name": "Obtainium-v1.7.4-arm64.apk",
+      "install_name": "07-obtainium.apk",
+      "package": "dev.imranr.obtainium",
+      "group": "power_apps",
+      "grant_root": false,
+      "manage_storage": false,
+      "battery_whitelist": true,
+      "install_packages": true,
+      "url": "https://github.com/ImranR98/Obtainium/releases/download/v1.7.4/app-arm64-v8a-release.apk",
+      "sha256": "f9216f721a7713b75929e0806bc18586f8fcf7328fbbff99b6aef1debb9eef80",
+      "size": 34609838
+    },
+    "app_manager": {
+      "name": "AppManager-v4.1.1.apk",
+      "install_name": "08-app-manager.apk",
+      "package": "io.github.muntashirakon.AppManager",
+      "group": "power_apps",
+      "grant_root": true,
+      "manage_storage": true,
+      "battery_whitelist": false,
+      "install_packages": true,
+      "url": "https://github.com/MuntashirAkon/AppManager/releases/download/v4.1.1/AppManager_v4.1.1.apk",
+      "sha256": "2540d6d9352acd8b04d6210140630a380abb1bc46ad4745c89ad97603dee3c40",
+      "size": 28270163
+    },
+    "shizuku": {
+      "name": "Shizuku-v13.6.0.apk",
+      "install_name": "09-shizuku.apk",
+      "package": "moe.shizuku.privileged.api",
+      "group": "power_apps",
+      "grant_root": true,
+      "manage_storage": false,
+      "battery_whitelist": true,
+      "install_packages": false,
+      "url": "https://github.com/RikkaApps/Shizuku/releases/download/v13.6.0/shizuku-v13.6.0.r1086.2650830c-release.apk",
+      "sha256": "6e273ab0e991c4e79bc8b1bbb9b9dd739ccac1a8712a541a214078886b7b790f",
+      "size": 2571773
+    },
+    "neo_backup": {
+      "name": "NeoBackup-8.3.18.apk",
+      "install_name": "10-neo-backup.apk",
+      "package": "com.machiav3lli.backup",
+      "group": "power_apps",
+      "grant_root": true,
+      "manage_storage": true,
+      "battery_whitelist": true,
+      "install_packages": true,
+      "url": "https://github.com/NeoApplications/Neo-Backup/releases/download/8.3.18/Neo_Backup_8.3.18_release.apk",
+      "sha256": "d2bd2fbd57bf1e99d12a40ba4418e66543a2983742f16b0f3509262f36f7b4f7",
+      "size": 11430871
+    },
+    "trustmealready": {
+      "name": "TrustMeAlready-v1.11.apk",
+      "install_name": "11-trustmealready.apk",
+      "package": "com.virb3.trustmealready",
+      "group": "pentest",
+      "grant_root": false,
+      "manage_storage": false,
+      "battery_whitelist": false,
+      "install_packages": false,
+      "url": "https://github.com/ViRb3/TrustMeAlready/releases/download/v1.11/TrustMeAlready-v1.11-release.apk",
+      "sha256": "ed6548bf43ec1373a430bfcfb0a01c5ccf50847b322f42012acb8ee9ee1327e5",
+      "size": 10127
+    }
+  }
+}
