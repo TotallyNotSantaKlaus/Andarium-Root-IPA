@@ -181,21 +181,28 @@ def main() -> int:
     else:
         audit.warn("On-device Control Panel (127.0.0.1:8787)", r.stdout.strip())
 
-    # 9. Pentest & Networking tools + Frida ready-to-run script pack
+    # 9. Pentest & Networking tools + Frida ready-to-run script pack + v5 engines
     r = audit.shell(
-        "frida-server --version && dropbear -V 2>&1 | head -n1 && "
-        "for t in strace socat sqlite3 jq tcpdump; do command -v $t >/dev/null || exit 1; done && "
+        "frida-server --version && frida-inject --version && dropbear -V 2>&1 | head -n1 && "
+        "for t in strace socat sqlite3 jq tcpdump andarium-workbench andarium-spoof andarium-net andarium-auto; do command -v $t >/dev/null || exit 1; done && "
         "SCOUNT=$(ls -1 /odm/andarium-root/tools/frida-scripts/*.js 2>/dev/null | wc -l) && "
         "echo \"CLI_SUITE_OK SCRIPTS=$SCOUNT\"",
         root=True,
     )
     if r.returncode == 0 and "Dropbear" in r.stdout and "CLI_SUITE_OK" in r.stdout:
         audit.ok(
-            "Frida, Dropbear SSH, 5 CLI tools & Frida script pack",
-            " / ".join(ln.strip() for ln in r.stdout.splitlines()[:2]) + " + strace/socat/sqlite3/jq/tcpdump + scripts",
+            "Frida Server + Inject, Dropbear SSH, 5 CLI tools & 4 v5 engines",
+            " / ".join(ln.strip() for ln in r.stdout.splitlines()[:3]) + " + v5 workbench/spoof/net/auto",
         )
     else:
-        audit.warn("Frida / Dropbear / CLI tools", (r.stdout + r.stderr).strip())
+        audit.warn("Frida / Dropbear / v5 CLI tools", (r.stdout + r.stderr).strip())
+
+    # 9b. v5 Spoof, Firewall & Netfilter kernel sanity
+    r_sp = audit.shell("andarium-spoof status && andarium-net status", root=True)
+    if r_sp.returncode == 0 and '"profile"' in r_sp.stdout and '"firewall_blocked_count"' in r_sp.stdout:
+        audit.ok("v5 Spoofer & Net/Firewall engines", "live JSON telemetry verified")
+    else:
+        audit.warn("v5 Spoofer & Net/Firewall engines", (r_sp.stdout + r_sp.stderr).strip())
 
     # 10. Bundled APKs + Shizuku + microG spoofing check
     expected_pkgs = [

@@ -807,6 +807,8 @@ cmd_status_json() {
     uptime_s="$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)"
     mem_avail="$("$BB" awk '/MemAvailable:/{printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0)"
     mem_total="$("$BB" awk '/MemTotal:/{printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0)"
+    spoof_prof="$(json_escape "$(read_state spoof_profile stock)")"
+    dev_model="$(json_escape "$(getprop ro.product.model 2>/dev/null)")"
 
     keys_json=""
     if [ -s "$SSH_DIR/authorized_keys" ]; then
@@ -832,8 +834,9 @@ cmd_status_json() {
         [ -n "$mods_json" ] && mods_json="$mods_json,$item" || mods_json="$item"
     done
 
-    printf '{"kernel":"%s","android":"%s","sdk":"%s","magisk":"%s","root_su":"%s","active_mode":"%s","preboot_preset":"%s","selinux":"%s","stealth":"%s","debuggable":"%s","adbroot":"%s","proxy":"%s","display_size":"%s","display_density":"%s","anim_scale":"%s","swappiness":%s,"stay_awake":"%s","adblock":"%s","certs":"%s","certs_extra":%s,"frida":"%s","frida_autostart":"%s","frida_bind":"%s","ssh":"%s","ssh_autostart":"%s","ssh_port":"%s","ssh_keys":%s,"ssh_key_list":[%s],"shizuku":"%s","webui":"%s","uptime_sec":%s,"mem_avail_mb":%s,"mem_total_mb":%s,"modules":[%s]}\n' \
+    printf '{"kernel":"%s","android":"%s","sdk":"%s","magisk":"%s","root_su":"%s","active_mode":"%s","preboot_preset":"%s","spoof_profile":"%s","device_model":"%s","selinux":"%s","stealth":"%s","debuggable":"%s","adbroot":"%s","proxy":"%s","display_size":"%s","display_density":"%s","anim_scale":"%s","swappiness":%s,"stay_awake":"%s","adblock":"%s","certs":"%s","certs_extra":%s,"frida":"%s","frida_autostart":"%s","frida_bind":"%s","ssh":"%s","ssh_autostart":"%s","ssh_port":"%s","ssh_keys":%s,"ssh_key_list":[%s],"shizuku":"%s","webui":"%s","uptime_sec":%s,"mem_avail_mb":%s,"mem_total_mb":%s,"modules":[%s]}\n' \
         "$kernel" "$android_rel" "$android_sdk" "$magisk_ver" "$root_su" "$active_mode" "$preboot_preset" \
+        "$spoof_prof" "$dev_model" \
         "$selinux_live" "$stealth" "$debuggable" "$adbroot_enabled" "$proxy_val" "$disp_size" "$disp_density" \
         "$anim_val" "$swap_val" "$awake_val" "$adblock" "$certs" "$certs_extra" \
         "$frida" "$frida_auto" "$frida_bind" "$ssh_st" "$ssh_auto" "$ssh_port" "$ssh_keys" "$keys_json" \
@@ -843,6 +846,10 @@ cmd_status_json() {
 case "${1:-status}" in
     status) cmd_status ;;
     status-json) cmd_status_json ;;
+    wb|workbench) shift; exec "$ODM_ROOT/scripts/andarium-workbench" "$@" ;;
+    spoof) shift; exec "$ODM_ROOT/scripts/andarium-spoof" "$@" ;;
+    net) shift; exec "$ODM_ROOT/scripts/andarium-net" "$@" ;;
+    auto) shift; exec "$ODM_ROOT/scripts/andarium-auto" "$@" ;;
     apps-json) cmd_apps_json ;;
     bundled-json) cmd_bundled_json ;;
     bundled-install) cmd_bundled_install "$2" ;;

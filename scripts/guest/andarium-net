@@ -1,0 +1,412 @@
+#!/system/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
+# andarium-net — Root Per-App Firewall, Transparent UID MITM Proxy,
+# Private DNS (DoT) Manager, WireGuard & SOCKS5 Tunnel Helpers (v5).
+
+STATE_DIR="/data/adb/andarium"
+RUN_DIR="$STATE_DIR/run"
+FW_LIST="$STATE_DIR/firewall-blocked.list"
+TPROXY_CONF="$STATE_DIR/tproxy.conf"
+WG_CONF="$STATE_DIR/wg0.conf"
+ODM_ROOT="/odm/andarium-root"
+
+BB="/data/adb/magisk/busybox"
+[ -x "$BB" ] || BB="$ODM_ROOT/magisk-bin/busybox"
+SOCAT="$ODM_ROOT/tools/cli/socat"
+[ -x "$SOCAT" ] || SOCAT="$(command -v socat 2>/dev/null || echo /odm/andarium-root/tools/cli/socat)"
+IPT="$(command -v iptables 2>/dev/null || echo /system/bin/iptables)"
+IP6T="$(command -v ip6tables 2>/dev/null || echo /system/bin/ip6tables)"
+
+if [ "$(id -u)" != "0" ]; then
+    echo "andarium-net: must be run as root" >&2
+    exit 1
+fi
+
+mkdir -p "$STATE_DIR" "$RUN_DIR" 2>/dev/null
+chmod 0700 "$STATE_DIR" "$RUN_DIR" 2>/dev/null
+
+json_escape() {
+    printf '%s' "$1" | "$BB" sed 's/\\/\\\\/g; s/"/\\"/g' | "$BB" tr '\r\n' '  '
+}
+
+valid_pkg() {
+    case "$1" in
+        ''|*[!A-Za-z0-9_.]*|*..*) return 1 ;;
+        *.*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+valid_ipv4_port() {
+    case "$1" in
+        *[!0-9.:]*) return 1 ;;
+        *:*)
+            ip="${1%:*}"
+            port="${1##*:}"
+            case "$port" in ''|*[!0-9]*) return 1 ;; esac
+            [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || return 1
+            case "$ip" in
+                [0-9]*.[0-9]*.[0-9]*.[0-9]*) return 0 ;;
+                *) return 1 ;;
+            esac
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+valid_hostname() {
+    case "$1" in
+        ''|*[!A-Za-z0-9.-]*|*..*|.*|*.) return 1 ;;
+        *.*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+pkg_uid() {
+    pkg="$1"
+    pm list packages -U "$pkg" 2>/dev/null | "$BB" awk -v p="package:$pkg" '
+        $1 == p {
+            for (i=2; i<=NF; i++) {
+                if (substr($i,1,4) == "uid:") {
+                    u = substr($i,5)
+                    gsub(/[^0-9]/, "", u)
+                    print u
+                    exit
+                }
+            }
+        }
+    '
+}
+
+is_pid_running() {
+    pidfile="$1"
+    [ -f "$pidfile" ] || return 1
+    pid="$(cat "$pidfile" 2>/dev/null | tr -d '\r\n ')"
+    case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+    kill -0 "$pid" 2>/dev/null
+}
+
+# ── PER-APP ROOT FIREWALL (ANDARIUM_FW) ────────────────────────────────────
+
+fw_ensure_chain() {
+    "$IPT" -w -N ANDARIUM_FW 2>/dev/null || true
+    "$IPT" -w -C OUTPUT -j ANDARIUM_FW 2>/dev/null || "$IPT" -w -I OUTPUT 1 -j ANDARIUM_FW 2>/dev/null || true
+    if [ -x "$IP6T" ]; then
+        "$IP6T" -w -N ANDARIUM_FW 2>/dev/null || true
+        "$IP6T" -w -C OUTPUT -j ANDARIUM_FW 2>/dev/null || "$IP6T" -w -I OUTPUT 1 -j ANDARIUM_FW 2>/dev/null || true
+    fi
+}
+
+cmd_fw_apply() {
+    fw_ensure_chain
+    "$IPT" -w -F ANDARIUM_FW 2>/dev/null || true
+    [ -x "$IP6T" ] && "$IP6T" -w -F ANDARIUM_FW 2>/dev/null || true
+    [ -f "$FW_LIST" ] || return 0
+    count=0
+    while IFS= read -r pkg; do
+        pkg="$(printf '%s' "$pkg" | tr -d '\r\n ')"
+        [ -n "$pkg" ] || continue
+        valid_pkg "$pkg" || continue
+        uid="$(pkg_uid "$pkg")"
+        case "$uid" in ''|*[!0-9]*) continue ;; esac
+        # Never block root (0) or system (1000) or shell (2000)
+        [ "$uid" -lt 10000 ] && continue
+        "$IPT" -w -A ANDARIUM_FW -m owner --uid-owner "$uid" -o lo -j RETURN 2>/dev/null || true
+        "$IPT" -w -A ANDARIUM_FW -m owner --uid-owner "$uid" -j REJECT --reject-with icmp-port-unreachable 2>/dev/null || \
+            "$IPT" -w -A ANDARIUM_FW -m owner --uid-owner "$uid" -j DROP 2>/dev/null || true
+        if [ -x "$IP6T" ]; then
+            "$IP6T" -w -A ANDARIUM_FW -m owner --uid-owner "$uid" -o lo -j RETURN 2>/dev/null || true
+            "$IP6T" -w -A ANDARIUM_FW -m owner --uid-owner "$uid" -j REJECT 2>/dev/null || \
+                "$IP6T" -w -A ANDARIUM_FW -m owner --uid-owner "$uid" -j DROP 2>/dev/null || true
+        fi
+        count=$((count + 1))
+    done < "$FW_LIST"
+    echo "applied firewall rules for $count blocked app(s)"
+}
+
+cmd_fw_block() {
+    pkg="$1"
+    valid_pkg "$pkg" || { echo "invalid package" >&2; return 1; }
+    touch "$FW_LIST"
+    grep -Fxv "$pkg" "$FW_LIST" > "$FW_LIST.tmp" 2>/dev/null || true
+    printf '%s\n' "$pkg" >> "$FW_LIST.tmp"
+    mv "$FW_LIST.tmp" "$FW_LIST"
+    chmod 0600 "$FW_LIST"
+    cmd_fw_apply
+}
+
+cmd_fw_unblock() {
+    pkg="$1"
+    valid_pkg "$pkg" || { echo "invalid package" >&2; return 1; }
+    [ -f "$FW_LIST" ] && { grep -Fxv "$pkg" "$FW_LIST" > "$FW_LIST.tmp" 2>/dev/null || true; mv "$FW_LIST.tmp" "$FW_LIST"; }
+    cmd_fw_apply
+}
+
+cmd_fw_flush() {
+    rm -f "$FW_LIST"
+    "$IPT" -w -F ANDARIUM_FW 2>/dev/null || true
+    [ -x "$IP6T" ] && "$IP6T" -w -F ANDARIUM_FW 2>/dev/null || true
+    echo "flushed all per-app firewall blocks"
+}
+
+cmd_fw_list() {
+    printf '['
+    first=1
+    if [ -f "$FW_LIST" ]; then
+        while IFS= read -r pkg; do
+            pkg="$(printf '%s' "$pkg" | tr -d '\r\n ')"
+            [ -n "$pkg" ] || continue
+            [ "$first" = "1" ] || printf ','
+            first=0
+            printf '"%s"' "$(json_escape "$pkg")"
+        done < "$FW_LIST"
+    fi
+    printf ']\n'
+}
+
+# ── TRANSPARENT UID MITM PROXY (ANDARIUM_MITM) ─────────────────────────────
+
+tproxy_ensure_chain() {
+    "$IPT" -w -t nat -N ANDARIUM_MITM 2>/dev/null || true
+    "$IPT" -w -t nat -C OUTPUT -j ANDARIUM_MITM 2>/dev/null || "$IPT" -w -t nat -I OUTPUT 1 -j ANDARIUM_MITM 2>/dev/null || true
+}
+
+cmd_tproxy_apply() {
+    tproxy_ensure_chain
+    "$IPT" -w -t nat -F ANDARIUM_MITM 2>/dev/null || true
+    [ -f "$TPROXY_CONF" ] || return 0
+
+    target=""
+    scope=""
+    ports="80,443"
+    while IFS='=' read -r k v; do
+        case "$k" in
+            target) target="$v" ;;
+            scope)  scope="$v" ;;
+            ports)  ports="$v" ;;
+        esac
+    done < "$TPROXY_CONF"
+    valid_ipv4_port "$target" || return 0
+    ip="${target%:*}"
+
+    # Always exempt loopback, root (UID 0), and traffic already heading to proxy IP
+    "$IPT" -w -t nat -A ANDARIUM_MITM -o lo -j RETURN 2>/dev/null || true
+    "$IPT" -w -t nat -A ANDARIUM_MITM -d 127.0.0.0/8 -j RETURN 2>/dev/null || true
+    "$IPT" -w -t nat -A ANDARIUM_MITM -d "$ip" -j RETURN 2>/dev/null || true
+    "$IPT" -w -t nat -A ANDARIUM_MITM -m owner --uid-owner 0 -j RETURN 2>/dev/null || true
+
+    old_ifs="$IFS"
+    if [ "$scope" = "all" ] || [ -z "$scope" ]; then
+        IFS=','
+        for pt in $ports; do
+            case "$pt" in ''|*[!0-9]*) continue ;; esac
+            "$IPT" -w -t nat -A ANDARIUM_MITM -p tcp --dport "$pt" -m owner --uid-owner 10000-99999 -j DNAT --to-destination "$target" 2>/dev/null || true
+        done
+        IFS="$old_ifs"
+    else
+        IFS=','
+        for pkg in $scope; do
+            IFS="$old_ifs"
+            valid_pkg "$pkg" || continue
+            uid="$(pkg_uid "$pkg")"
+            case "$uid" in ''|*[!0-9]*) continue ;; esac
+            IFS=','
+            for pt in $ports; do
+                case "$pt" in ''|*[!0-9]*) continue ;; esac
+                "$IPT" -w -t nat -A ANDARIUM_MITM -p tcp --dport "$pt" -m owner --uid-owner "$uid" -j DNAT --to-destination "$target" 2>/dev/null || true
+            done
+        done
+        IFS="$old_ifs"
+    fi
+    echo "transparent MITM redirect active -> $target (scope=$scope ports=$ports)"
+}
+
+cmd_tproxy_set() {
+    target="$1"
+    scope="${2:-all}"
+    ports="${3:-80,443}"
+    valid_ipv4_port "$target" || { echo "target must be IPv4:PORT (e.g. 192.168.1.10:8080)" >&2; return 1; }
+    case "$ports" in
+        ''|*[!0-9,]*) echo "ports must be comma-separated numbers (e.g. 80,443)" >&2; return 1 ;;
+    esac
+    if [ "$scope" != "all" ]; then
+        old_ifs="$IFS"
+        IFS=','
+        for pkg in $scope; do
+            IFS="$old_ifs"
+            valid_pkg "$pkg" || { echo "invalid package in scope: $pkg" >&2; return 1; }
+            IFS=','
+        done
+        IFS="$old_ifs"
+    fi
+    {
+        printf 'target=%s\n' "$target"
+        printf 'scope=%s\n' "$scope"
+        printf 'ports=%s\n' "$ports"
+    } > "$TPROXY_CONF"
+    chmod 0600 "$TPROXY_CONF"
+    cmd_tproxy_apply
+}
+
+cmd_tproxy_clear() {
+    rm -f "$TPROXY_CONF"
+    "$IPT" -w -t nat -F ANDARIUM_MITM 2>/dev/null || true
+    echo "transparent MITM proxy rules cleared"
+}
+
+# ── PRIVATE DNS (DoT) OVERRIDE ─────────────────────────────────────────────
+
+cmd_dns_set() {
+    preset="$1"
+    host=""
+    case "$preset" in
+        off|default|system)
+            settings put global private_dns_mode opportunistic 2>/dev/null || true
+            settings delete global private_dns_specifier 2>/dev/null || true
+            echo "Private DNS restored to system opportunistic mode"
+            return 0
+            ;;
+        cloudflare) host="one.one.one.one" ;;
+        quad9)      host="dns.quad9.net" ;;
+        adguard)    host="dns.adguard-dns.com" ;;
+        mullvad)    host="dns.mullvad.net" ;;
+        google)     host="dns.google" ;;
+        *)
+            valid_hostname "$preset" || { echo "invalid DoT hostname: $preset" >&2; return 1; }
+            host="$preset"
+            ;;
+    esac
+    settings put global private_dns_mode hostname 2>/dev/null || true
+    settings put global private_dns_specifier "$host" 2>/dev/null || true
+    echo "Private DNS (DoT) set to $host"
+}
+
+# ── WIREGUARD & SOCAT TUNNEL HELPERS ───────────────────────────────────────
+
+cmd_wg_import() {
+    tmp="$WG_CONF.tmp"
+    "$BB" head -c 32768 > "$tmp"
+    if ! grep -q '^\[Interface\]' "$tmp"; then
+        rm -f "$tmp"
+        echo "invalid WireGuard config: missing [Interface]" >&2
+        return 1
+    fi
+    mv "$tmp" "$WG_CONF"
+    chmod 0600 "$WG_CONF"
+    echo "saved WireGuard config ($WG_CONF)"
+}
+
+cmd_wg_up() {
+    [ -f "$WG_CONF" ] || { echo "no wg0.conf imported yet" >&2; return 1; }
+    if command -v wg-quick >/dev/null 2>&1; then
+        wg-quick up "$WG_CONF" 2>&1
+    else
+        echo "kernel WireGuard module is built-in (CONFIG_WIREGUARD=y); wg0.conf is staged at $WG_CONF — install Termux 'wireguard-tools' (pkg install wireguard-tools) or WireGuard app to bring up wg0"
+    fi
+}
+
+cmd_wg_down() {
+    if command -v wg-quick >/dev/null 2>&1 && [ -f "$WG_CONF" ]; then
+        wg-quick down "$WG_CONF" 2>&1 || true
+    else
+        ip link delete dev wg0 2>/dev/null || true
+    fi
+    echo "wg0 down"
+}
+
+cmd_tunnel_start() {
+    lport="$1"
+    target="$2"
+    case "$lport" in ''|*[!0-9]*) echo "invalid local port" >&2; return 1 ;; esac
+    [ "$lport" -ge 1024 ] && [ "$lport" -le 65535 ] || { echo "local port must be 1024..65535" >&2; return 1; }
+    valid_ipv4_port "$target" || { echo "target must be IPv4:PORT" >&2; return 1; }
+    [ -x "$SOCAT" ] || { echo "socat not bundled" >&2; return 1; }
+    cmd_tunnel_stop >/dev/null 2>&1 || true
+    nohup "$SOCAT" "TCP-LISTEN:${lport},bind=127.0.0.1,fork,reuseaddr" "TCP:${target}" > "$RUN_DIR/tunnel.log" 2>&1 &
+    echo $! > "$RUN_DIR/tunnel.pid"
+    printf '%s->%s\n' "$lport" "$target" > "$RUN_DIR/tunnel.spec"
+    sleep 1
+    if is_pid_running "$RUN_DIR/tunnel.pid"; then
+        echo "socat TCP forwarder active: 127.0.0.1:$lport -> $target"
+    else
+        echo "socat tunnel failed" >&2
+        return 1
+    fi
+}
+
+cmd_tunnel_stop() {
+    if [ -f "$RUN_DIR/tunnel.pid" ]; then
+        pid="$(cat "$RUN_DIR/tunnel.pid" 2>/dev/null | tr -d '\r\n ')"
+        case "$pid" in ''|*[!0-9]*) ;; *) kill "$pid" 2>/dev/null || true ;; esac
+        rm -f "$RUN_DIR/tunnel.pid" "$RUN_DIR/tunnel.spec"
+    fi
+    echo "socat tunnel stopped"
+}
+
+cmd_status() {
+    fw_count=0
+    [ -f "$FW_LIST" ] && fw_count="$(grep -c '[A-Za-z0-9]' "$FW_LIST" 2>/dev/null || echo 0)"
+    tp_target=""
+    tp_scope=""
+    tp_ports=""
+    if [ -f "$TPROXY_CONF" ]; then
+        while IFS='=' read -r k v; do
+            case "$k" in
+                target) tp_target="$v" ;;
+                scope)  tp_scope="$v" ;;
+                ports)  tp_ports="$v" ;;
+            esac
+        done < "$TPROXY_CONF"
+    fi
+    dns_mode="$(settings get global private_dns_mode 2>/dev/null | tr -d '\r\n ')"
+    dns_spec="$(settings get global private_dns_specifier 2>/dev/null | tr -d '\r\n ')"
+    [ "$dns_spec" = "null" ] && dns_spec=""
+    wg_present="false"
+    [ -f "$WG_CONF" ] && wg_present="true"
+    wg_up="false"
+    ip link show wg0 >/dev/null 2>&1 && wg_up="true"
+    tun_running="false"
+    tun_spec=""
+    if is_pid_running "$RUN_DIR/tunnel.pid"; then
+        tun_running="true"
+        tun_spec="$(cat "$RUN_DIR/tunnel.spec" 2>/dev/null | tr -d '\r\n')"
+    fi
+    printf '{"firewall_blocked_count":%s,"tproxy_target":"%s","tproxy_scope":"%s","tproxy_ports":"%s","dns_mode":"%s","dns_specifier":"%s","wg_configured":%s,"wg_up":%s,"tunnel_running":%s,"tunnel_spec":"%s"}\n' \
+        "${fw_count:-0}" \
+        "$(json_escape "$tp_target")" \
+        "$(json_escape "$tp_scope")" \
+        "$(json_escape "$tp_ports")" \
+        "$(json_escape "$dns_mode")" \
+        "$(json_escape "$dns_spec")" \
+        "$wg_present" "$wg_up" "$tun_running" "$(json_escape "$tun_spec")"
+}
+
+case "${1:-status}" in
+    status)       cmd_status ;;
+    fw-apply)     cmd_fw_apply ;;
+    fw-list)      cmd_fw_list ;;
+    fw-block)     shift; cmd_fw_block "$@" ;;
+    fw-unblock)   shift; cmd_fw_unblock "$@" ;;
+    fw-flush)     cmd_fw_flush ;;
+    tproxy-apply) cmd_tproxy_apply ;;
+    tproxy-set)   shift; cmd_tproxy_set "$@" ;;
+    tproxy-clear) cmd_tproxy_clear ;;
+    dns-set)      shift; cmd_dns_set "$@" ;;
+    wg-import)    cmd_wg_import ;;
+    wg-up)        cmd_wg_up ;;
+    wg-down)      cmd_wg_down ;;
+    tunnel-start) shift; cmd_tunnel_start "$@" ;;
+    tunnel-stop)  cmd_tunnel_stop ;;
+    *)
+        cat <<'EOF'
+Usage: andarium-net <command> [args...]
+  status
+  fw-list | fw-apply | fw-block <pkg> | fw-unblock <pkg> | fw-flush
+  tproxy-set <ipv4:port> [all|pkg1,pkg2] [ports] | tproxy-apply | tproxy-clear
+  dns-set <off|cloudflare|quad9|adguard|mullvad|google|hostname>
+  wg-import | wg-up | wg-down
+  tunnel-start <local_port> <ipv4:port> | tunnel-stop
+EOF
+        exit 1
+        ;;
+esac

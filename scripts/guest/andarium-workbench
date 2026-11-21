@@ -1,0 +1,443 @@
+#!/system/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
+# andarium-workbench — On-Device Pentest & RE Workbench for Andarium Root v5.
+# Provides standalone frida-inject runner, tcpdump PCAP ring recorder,
+# filtered logcat reader, and read-only App SharedPrefs/SQLite inspector.
+
+STATE_DIR="/data/adb/andarium"
+RUN_DIR="$STATE_DIR/run"
+PCAP_DIR="$STATE_DIR/pcaps"
+USER_FRIDA_DIR="$STATE_DIR/frida-scripts"
+ODM_ROOT="/odm/andarium-root"
+BUILTIN_FRIDA_DIR="$ODM_ROOT/tools/frida-scripts"
+
+BB="/data/adb/magisk/busybox"
+[ -x "$BB" ] || BB="$ODM_ROOT/magisk-bin/busybox"
+FRIDA_INJECT="$ODM_ROOT/tools/frida-inject"
+TCPDUMP="$ODM_ROOT/tools/cli/tcpdump"
+[ -x "$TCPDUMP" ] || TCPDUMP="$(command -v tcpdump 2>/dev/null || echo /odm/andarium-root/tools/cli/tcpdump)"
+SQLITE3="$ODM_ROOT/tools/cli/sqlite3"
+[ -x "$SQLITE3" ] || SQLITE3="$(command -v sqlite3 2>/dev/null || echo /odm/andarium-root/tools/cli/sqlite3)"
+JQ="$ODM_ROOT/tools/cli/jq"
+[ -x "$JQ" ] || JQ="$(command -v jq 2>/dev/null || echo /odm/andarium-root/tools/cli/jq)"
+
+if [ "$(id -u)" != "0" ]; then
+    echo "andarium-workbench: must be run as root" >&2
+    exit 1
+fi
+
+mkdir -p "$STATE_DIR" "$RUN_DIR" "$PCAP_DIR" "$USER_FRIDA_DIR" 2>/dev/null
+chmod 0700 "$STATE_DIR" "$RUN_DIR" "$PCAP_DIR" "$USER_FRIDA_DIR" 2>/dev/null
+
+json_escape() {
+    printf '%s' "$1" | "$BB" sed 's/\\/\\\\/g; s/"/\\"/g' | "$BB" tr '\r\n' '  '
+}
+
+valid_pkg() {
+    case "$1" in
+        ''|*[!A-Za-z0-9_.]*|*..*) return 1 ;;
+        *.*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+valid_fname() {
+    case "$1" in
+        ''|.*|*[!A-Za-z0-9_.-]*|*/*|*..*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+valid_ident() {
+    case "$1" in
+        ''|*[!A-Za-z0-9_$-]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+is_pid_running() {
+    pidfile="$1"
+    [ -f "$pidfile" ] || return 1
+    pid="$(cat "$pidfile" 2>/dev/null | tr -d '\r\n ')"
+    case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+    kill -0 "$pid" 2>/dev/null
+}
+
+resolve_script_path() {
+    name="$1"
+    valid_fname "$name" || return 1
+    case "$name" in
+        *.js) ;;
+        *) return 1 ;;
+    esac
+    if [ -f "$USER_FRIDA_DIR/$name" ]; then
+        printf '%s' "$USER_FRIDA_DIR/$name"
+        return 0
+    fi
+    if [ -f "$BUILTIN_FRIDA_DIR/$name" ]; then
+        printf '%s' "$BUILTIN_FRIDA_DIR/$name"
+        return 0
+    fi
+    return 1
+}
+
+# ── FRIDA-INJECT WORKBENCH ─────────────────────────────────────────────────
+
+cmd_frida_scripts() {
+    printf '['
+    first=1
+    for dir in "$BUILTIN_FRIDA_DIR" "$USER_FRIDA_DIR"; do
+        src="builtin"
+        [ "$dir" = "$USER_FRIDA_DIR" ] && src="custom"
+        [ -d "$dir" ] || continue
+        for f in "$dir"/*.js; do
+            [ -f "$f" ] || continue
+            bn="$(basename "$f")"
+            sz="$(wc -c < "$f" 2>/dev/null | tr -d ' ')"
+            [ "$first" = "1" ] || printf ','
+            first=0
+            printf '{"name":"%s","source":"%s","size":%s}' \
+                "$(json_escape "$bn")" "$src" "${sz:-0}"
+        done
+    done
+    printf ']\n'
+}
+
+cmd_frida_status() {
+    running="false"
+    pid=""
+    target=""
+    script=""
+    if is_pid_running "$RUN_DIR/frida-inject.pid"; then
+        running="true"
+        pid="$(cat "$RUN_DIR/frida-inject.pid" 2>/dev/null | tr -d '\r\n ')"
+        target="$(cat "$RUN_DIR/frida-inject.target" 2>/dev/null | tr -d '\r\n')"
+        script="$(cat "$RUN_DIR/frida-inject.script" 2>/dev/null | tr -d '\r\n')"
+    fi
+    avail="false"
+    [ -x "$FRIDA_INJECT" ] && avail="true"
+    printf '{"available":%s,"running":%s,"pid":"%s","target":"%s","script":"%s"}\n' \
+        "$avail" "$running" "$(json_escape "$pid")" "$(json_escape "$target")" "$(json_escape "$script")"
+}
+
+cmd_frida_run() {
+    mode="$1"    # spawn | attach
+    pkg="$2"
+    sname="$3"
+    if [ ! -x "$FRIDA_INJECT" ]; then
+        echo "frida-inject binary not bundled in this build" >&2
+        return 1
+    fi
+    valid_pkg "$pkg" || { echo "invalid package name: $pkg" >&2; return 1; }
+    spath="$(resolve_script_path "$sname")" || { echo "script not found: $sname" >&2; return 1; }
+
+    cmd_frida_stop >/dev/null 2>&1 || true
+    : > "$RUN_DIR/frida-inject.log"
+    chmod 0600 "$RUN_DIR/frida-inject.log" 2>/dev/null
+    printf '%s\n' "$pkg" > "$RUN_DIR/frida-inject.target"
+    printf '%s\n' "$sname" > "$RUN_DIR/frida-inject.script"
+
+    if [ "$mode" = "attach" ]; then
+        tpid="$("$BB" pidof "$pkg" 2>/dev/null | awk '{print $1}')"
+        if [ -z "$tpid" ]; then
+            echo "target process not running: $pkg (use spawn mode or launch app first)" >&2
+            return 1
+        fi
+        nohup "$FRIDA_INJECT" -p "$tpid" -s "$spath" --eternalize=false > "$RUN_DIR/frida-inject.log" 2>&1 &
+    else
+        nohup "$FRIDA_INJECT" -f "$pkg" -s "$spath" > "$RUN_DIR/frida-inject.log" 2>&1 &
+    fi
+    echo $! > "$RUN_DIR/frida-inject.pid"
+    sleep 1
+    if is_pid_running "$RUN_DIR/frida-inject.pid"; then
+        echo "frida-inject started ($mode $pkg with $sname, pid $(cat "$RUN_DIR/frida-inject.pid"))"
+    else
+        echo "frida-inject exited early — check output log:"
+        "$BB" tail -n 25 "$RUN_DIR/frida-inject.log" 2>/dev/null || true
+    fi
+}
+
+cmd_frida_stop() {
+    if [ -f "$RUN_DIR/frida-inject.pid" ]; then
+        pid="$(cat "$RUN_DIR/frida-inject.pid" 2>/dev/null | tr -d '\r\n ')"
+        case "$pid" in ''|*[!0-9]*) ;; *) kill "$pid" 2>/dev/null || true ;; esac
+        rm -f "$RUN_DIR/frida-inject.pid"
+    fi
+    "$BB" pkill -f 'frida-inject' 2>/dev/null || true
+    echo "frida-inject stopped"
+}
+
+cmd_frida_log() {
+    lines="${1:-120}"
+    case "$lines" in ''|*[!0-9]*) lines=120 ;; esac
+    [ "$lines" -gt 500 ] && lines=500
+    if [ -f "$RUN_DIR/frida-inject.log" ]; then
+        "$BB" tail -n "$lines" "$RUN_DIR/frida-inject.log"
+    else
+        echo "(no frida-inject output yet)"
+    fi
+}
+
+cmd_frida_save() {
+    sname="$1"
+    valid_fname "$sname" || { echo "invalid script filename" >&2; return 1; }
+    case "$sname" in *.js) ;; *) sname="${sname}.js" ;; esac
+    out="$USER_FRIDA_DIR/$sname"
+    "$BB" head -c 65536 > "$out"
+    chmod 0600 "$out"
+    echo "saved custom script: $sname"
+}
+
+cmd_frida_read() {
+    sname="$1"
+    spath="$(resolve_script_path "$sname")" || { echo "script not found" >&2; return 1; }
+    "$BB" head -c 65536 "$spath"
+}
+
+cmd_frida_delete() {
+    sname="$1"
+    valid_fname "$sname" || { echo "invalid script filename" >&2; return 1; }
+    if [ -f "$USER_FRIDA_DIR/$sname" ]; then
+        rm -f "$USER_FRIDA_DIR/$sname"
+        echo "deleted custom script: $sname"
+    else
+        echo "custom script not found (built-in scripts are read-only)" >&2
+        return 1
+    fi
+}
+
+# ── TCPDUMP PCAP RECORDER ──────────────────────────────────────────────────
+
+cmd_pcap_status() {
+    running="false"
+    pid=""
+    cur=""
+    if is_pid_running "$RUN_DIR/tcpdump.pid"; then
+        running="true"
+        pid="$(cat "$RUN_DIR/tcpdump.pid" 2>/dev/null | tr -d '\r\n ')"
+        cur="$(cat "$RUN_DIR/tcpdump.file" 2>/dev/null | tr -d '\r\n')"
+    fi
+    avail="false"
+    [ -x "$TCPDUMP" ] && avail="true"
+    printf '{"available":%s,"running":%s,"pid":"%s","file":"%s"}\n' \
+        "$avail" "$running" "$(json_escape "$pid")" "$(json_escape "$cur")"
+}
+
+cmd_pcap_start() {
+    filter="${1:-}"
+    if [ ! -x "$TCPDUMP" ]; then
+        echo "tcpdump binary not bundled" >&2
+        return 1
+    fi
+    # Strict BPF filter character allowlist (blocks shell metacharacters)
+    case "$filter" in
+        *[!A-Za-z0-9\ .:=/_-]*)
+            echo "invalid BPF filter characters" >&2
+            return 1
+            ;;
+    esac
+    cmd_pcap_stop >/dev/null 2>&1 || true
+    ts="$(date +%Y%m%d-%H%M%S 2>/dev/null || echo cap)"
+    fname="capture-${ts}.pcap"
+    fpath="$PCAP_DIR/$fname"
+    printf '%s\n' "$fname" > "$RUN_DIR/tcpdump.file"
+    if [ -n "$filter" ]; then
+        # shellcheck disable=SC2086
+        nohup "$TCPDUMP" -i any -s 0 -U -C 25 -W 4 -w "$fpath" $filter > "$RUN_DIR/tcpdump.log" 2>&1 &
+    else
+        nohup "$TCPDUMP" -i any -s 0 -U -C 25 -W 4 -w "$fpath" > "$RUN_DIR/tcpdump.log" 2>&1 &
+    fi
+    echo $! > "$RUN_DIR/tcpdump.pid"
+    sleep 1
+    if is_pid_running "$RUN_DIR/tcpdump.pid"; then
+        echo "pcap recording started -> $fname"
+    else
+        echo "tcpdump failed to start:" >&2
+        "$BB" tail -n 10 "$RUN_DIR/tcpdump.log" >&2
+        return 1
+    fi
+}
+
+cmd_pcap_stop() {
+    if [ -f "$RUN_DIR/tcpdump.pid" ]; then
+        pid="$(cat "$RUN_DIR/tcpdump.pid" 2>/dev/null | tr -d '\r\n ')"
+        case "$pid" in ''|*[!0-9]*) ;; *) kill "$pid" 2>/dev/null || true ;; esac
+        rm -f "$RUN_DIR/tcpdump.pid"
+    fi
+    "$BB" pkill -f 'andarium-root/tools/tcpdump' 2>/dev/null || true
+    echo "pcap recording stopped"
+}
+
+cmd_pcap_list() {
+    printf '['
+    first=1
+    for f in "$PCAP_DIR"/capture-*.pcap*; do
+        [ -f "$f" ] || continue
+        bn="$(basename "$f")"
+        sz="$(wc -c < "$f" 2>/dev/null | tr -d ' ')"
+        [ "$first" = "1" ] || printf ','
+        first=0
+        printf '{"name":"%s","size":%s}' "$(json_escape "$bn")" "${sz:-0}"
+    done
+    printf ']\n'
+}
+
+cmd_pcap_path() {
+    fname="$1"
+    valid_fname "$fname" || return 1
+    case "$fname" in capture-*.pcap*) ;; *) return 1 ;; esac
+    [ -f "$PCAP_DIR/$fname" ] || return 1
+    printf '%s' "$PCAP_DIR/$fname"
+}
+
+cmd_pcap_delete() {
+    fname="$1"
+    p="$(cmd_pcap_path "$fname")" || { echo "pcap not found" >&2; return 1; }
+    rm -f "$p"
+    echo "deleted $fname"
+}
+
+# ── FILTERED LOGCAT READER ─────────────────────────────────────────────────
+
+cmd_logcat() {
+    pkg="${1:-}"
+    level="${2:-I}"
+    lines="${3:-100}"
+    case "$level" in V|D|I|W|E) ;; *) level="I" ;; esac
+    case "$lines" in ''|*[!0-9]*) lines=100 ;; esac
+    [ "$lines" -gt 400 ] && lines=400
+
+    if [ -n "$pkg" ]; then
+        valid_pkg "$pkg" || { echo "invalid package" >&2; return 1; }
+        pid="$("$BB" pidof "$pkg" 2>/dev/null | awk '{print $1}')"
+        if [ -n "$pid" ]; then
+            logcat -d -v time --pid="$pid" "*:$level" 2>/dev/null | "$BB" tail -n "$lines"
+        else
+            logcat -d -v time "*:$level" 2>/dev/null | "$BB" grep -F "$pkg" | "$BB" tail -n "$lines"
+        fi
+    else
+        logcat -d -v time "*:$level" 2>/dev/null | "$BB" tail -n "$lines"
+    fi
+}
+
+# ── READ-ONLY APP STORAGE INSPECTOR (SHARED_PREFS & SQLITE) ────────────────
+
+cmd_inspect_files() {
+    pkg="$1"
+    valid_pkg "$pkg" || { echo "invalid package" >&2; return 1; }
+    base="/data/data/$pkg"
+    [ -d "$base" ] || { echo '{"prefs":[],"dbs":[]}'; return 0; }
+
+    printf '{"prefs":['
+    first=1
+    if [ -d "$base/shared_prefs" ]; then
+        for f in "$base/shared_prefs"/*.xml; do
+            [ -f "$f" ] || continue
+            bn="$(basename "$f")"
+            sz="$(wc -c < "$f" 2>/dev/null | tr -d ' ')"
+            [ "$first" = "1" ] || printf ','
+            first=0
+            printf '{"name":"%s","size":%s}' "$(json_escape "$bn")" "${sz:-0}"
+        done
+    fi
+    printf '],"dbs":['
+    first=1
+    if [ -d "$base/databases" ]; then
+        for f in "$base/databases"/*; do
+            [ -f "$f" ] || continue
+            bn="$(basename "$f")"
+            case "$bn" in *-journal|*-wal|*-shm) continue ;; esac
+            sz="$(wc -c < "$f" 2>/dev/null | tr -d ' ')"
+            [ "$first" = "1" ] || printf ','
+            first=0
+            printf '{"name":"%s","size":%s}' "$(json_escape "$bn")" "${sz:-0}"
+        done
+    fi
+    printf ']}\n'
+}
+
+cmd_inspect_xml() {
+    pkg="$1"
+    fname="$2"
+    valid_pkg "$pkg" || { echo "invalid package" >&2; return 1; }
+    valid_fname "$fname" || { echo "invalid filename" >&2; return 1; }
+    case "$fname" in *.xml) ;; *) echo "only .xml files allowed" >&2; return 1 ;; esac
+    target="/data/data/$pkg/shared_prefs/$fname"
+    [ -f "$target" ] || { echo "file not found" >&2; return 1; }
+    # Handle Android ABX binary XML if present
+    magic="$(dd if="$target" bs=1 count=3 2>/dev/null)"
+    if [ "$magic" = "ABX" ] && command -v abx2xml >/dev/null 2>&1; then
+        abx2xml "$target" - 2>/dev/null | "$BB" head -c 65536
+    else
+        "$BB" head -c 65536 "$target"
+    fi
+}
+
+cmd_inspect_db_tables() {
+    pkg="$1"
+    fname="$2"
+    valid_pkg "$pkg" || { echo "invalid package" >&2; return 1; }
+    valid_fname "$fname" || { echo "invalid filename" >&2; return 1; }
+    [ -x "$SQLITE3" ] || { echo "sqlite3 not bundled" >&2; return 1; }
+    target="/data/data/$pkg/databases/$fname"
+    [ -f "$target" ] || { echo "database not found" >&2; return 1; }
+    printf '['
+    first=1
+    "$SQLITE3" -readonly "$target" "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;" 2>/dev/null | while IFS= read -r tbl; do
+        [ -n "$tbl" ] || continue
+        [ "$first" = "1" ] || printf ','
+        first=0
+        printf '"%s"' "$(json_escape "$tbl")"
+    done
+    printf ']\n'
+}
+
+cmd_inspect_db_query() {
+    pkg="$1"
+    fname="$2"
+    tbl="$3"
+    limit="${4:-50}"
+    valid_pkg "$pkg" || { echo "invalid package" >&2; return 1; }
+    valid_fname "$fname" || { echo "invalid filename" >&2; return 1; }
+    valid_ident "$tbl" || { echo "invalid table name" >&2; return 1; }
+    case "$limit" in ''|*[!0-9]*) limit=50 ;; esac
+    [ "$limit" -gt 200 ] && limit=200
+    [ -x "$SQLITE3" ] || { echo "sqlite3 not bundled" >&2; return 1; }
+    target="/data/data/$pkg/databases/$fname"
+    [ -f "$target" ] || { echo "database not found" >&2; return 1; }
+    "$SQLITE3" -readonly -header -column "$target" "SELECT * FROM \"$tbl\" LIMIT $limit;" 2>&1 | "$BB" head -c 65536
+}
+
+case "${1:-help}" in
+    frida-scripts)    cmd_frida_scripts ;;
+    frida-status)     cmd_frida_status ;;
+    frida-run)        shift; cmd_frida_run "$@" ;;
+    frida-stop)       cmd_frida_stop ;;
+    frida-log)        shift; cmd_frida_log "$@" ;;
+    frida-save)       shift; cmd_frida_save "$@" ;;
+    frida-read)       shift; cmd_frida_read "$@" ;;
+    frida-delete)     shift; cmd_frida_delete "$@" ;;
+    pcap-status)      cmd_pcap_status ;;
+    pcap-start)       shift; cmd_pcap_start "$@" ;;
+    pcap-stop)        cmd_pcap_stop ;;
+    pcap-list)        cmd_pcap_list ;;
+    pcap-path)        shift; cmd_pcap_path "$@" ;;
+    pcap-delete)      shift; cmd_pcap_delete "$@" ;;
+    logcat)           shift; cmd_logcat "$@" ;;
+    inspect-files)    shift; cmd_inspect_files "$@" ;;
+    inspect-xml)      shift; cmd_inspect_xml "$@" ;;
+    inspect-db-tables) shift; cmd_inspect_db_tables "$@" ;;
+    inspect-db-query) shift; cmd_inspect_db_query "$@" ;;
+    *)
+        cat <<'EOF'
+Usage: andarium-workbench <command> [args...]
+  frida-scripts | frida-status | frida-run <spawn|attach> <pkg> <script.js>
+  frida-stop | frida-log [lines] | frida-save <name.js> | frida-read <name.js> | frida-delete <name.js>
+  pcap-status | pcap-start [bpf] | pcap-stop | pcap-list | pcap-delete <file>
+  logcat [pkg] [V|D|I|W|E] [lines]
+  inspect-files <pkg> | inspect-xml <pkg> <file.xml>
+  inspect-db-tables <pkg> <db> | inspect-db-query <pkg> <db> <table> [limit]
+EOF
+        exit 1
+        ;;
+esac

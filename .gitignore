@@ -4,6 +4,8 @@ work/
 build-ios/
 assets/ios/*.dylib
 andarium-config.json
+andarium-custom-presets.json
+manifests/artifacts.json.bak
 dist/*.ipa
 dist/*.sha256
 dist/SHA256SUMS.txt
@@ -15,6 +17,7 @@ Thumbs.db
 # Protect private user drop-ins in custom/ from accidental git push
 custom/authorized_keys
 custom/hosts
+custom/keybox.xml
 custom/apks/*.apk
 custom/modules/*.zip
 custom/certs/*.pem

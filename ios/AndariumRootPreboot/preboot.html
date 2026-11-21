@@ -3,99 +3,77 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Andarium Pre-Boot Studio</title>
+<title>Andarium Pre-Boot Studio v2</title>
 <style>
   :root {
-    --bg: #060b09;
-    --card: #0e1815;
-    --card2: #13221d;
-    --border: #1e3830;
-    --accent: #34f5a1;
-    --accent-dim: rgba(52,245,161,0.14);
-    --danger: #ff5c77;
-    --text: #e8f5ef;
-    --muted: #84a498;
+    --bg: #060b09; --card: #0e1815; --card2: #13221d; --border: #1e3830;
+    --accent: #34f5a1; --accent-dim: rgba(52,245,161,0.14);
+    --warn: #f5b942; --warn-dim: rgba(245,185,66,0.14);
+    --danger: #ff5c77; --text: #e8f5ef; --muted: #84a498;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body {
-    margin: 0; padding: 14px; padding-bottom: 92px;
+    margin: 0; padding: 14px; padding-bottom: 96px;
     background: radial-gradient(circle at 50% 0%, #102a20 0%, var(--bg) 52%);
     color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
     font-size: 14px; line-height: 1.4;
   }
-  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
   .brand { display: flex; align-items: center; gap: 10px; }
   .logo {
     width: 38px; height: 38px; border-radius: 11px;
-    background: linear-gradient(135deg, #0d271e, #06110d);
-    border: 1.5px solid var(--accent);
-    display: grid; place-items: center; color: var(--accent);
-    font-weight: 800; font-size: 21px;
+    background: linear-gradient(135deg, #0d271e, #06110d); border: 1.5px solid var(--accent);
+    display: grid; place-items: center; color: var(--accent); font-weight: 800; font-size: 21px;
   }
-  h1 { margin: 0; font-size: 18px; }
-  .sub { font-size: 11.5px; color: var(--muted); }
-  .card {
-    background: var(--card); border: 1px solid var(--border);
-    border-radius: 14px; padding: 13px 14px; margin-bottom: 12px;
-  }
-  .card h2 {
-    margin: 0 0 10px; font-size: 12.5px; color: var(--accent);
-    text-transform: uppercase; letter-spacing: 0.7px;
-  }
+  h1 { margin: 0; font-size: 17px; }
+  .sub { font-size: 11px; color: var(--muted); }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 13px 14px; margin-bottom: 12px; }
+  .card h2 { margin: 0 0 10px; font-size: 12px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.7px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; border: 1px solid var(--accent); background: var(--accent-dim); color: var(--accent); }
+  .badge.warn { border-color: var(--warn); background: var(--warn-dim); color: var(--warn); }
   .preset-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .preset-btn {
-    text-align: left; padding: 10px 11px; border-radius: 12px;
-    border: 1px solid var(--border); background: #0a1310; color: var(--text);
-    cursor: pointer; transition: 0.14s ease;
+    text-align: left; padding: 10px 11px; border-radius: 12px; position: relative;
+    border: 1px solid var(--border); background: #0a1310; color: var(--text); cursor: pointer;
   }
   .preset-btn.active { border-color: var(--accent); background: var(--accent-dim); }
-  .preset-btn .pt { font-weight: 700; font-size: 13.5px; margin-bottom: 3px; }
+  .preset-btn .pt { font-weight: 700; font-size: 13px; margin-bottom: 3px; }
   .preset-btn .pd { font-size: 11px; color: var(--muted); line-height: 1.3; }
-  .row {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    padding: 9px 0; border-top: 1px solid rgba(255,255,255,0.05);
+  .slot-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .slot-chip {
+    padding: 6px 11px; border-radius: 999px; border: 1px solid var(--border);
+    background: #0a1310; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer;
   }
+  .slot-chip.active { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid rgba(255,255,255,0.05); }
   .row:first-of-type { border-top: none; padding-top: 2px; }
-  .rt { font-weight: 600; font-size: 14px; }
+  .rt { font-weight: 600; font-size: 13.5px; }
   .rd { font-size: 11.5px; color: var(--muted); }
-  .switch {
-    position: relative; width: 46px; height: 26px; flex-shrink: 0;
-  }
+  .switch { position: relative; width: 46px; height: 26px; flex-shrink: 0; }
   .switch input { opacity: 0; width: 0; height: 0; }
-  .slider {
-    position: absolute; inset: 0; border-radius: 999px;
-    background: #1b2c26; border: 1px solid var(--border); transition: 0.18s; cursor: pointer;
-  }
-  .slider:before {
-    content: ""; position: absolute; width: 20px; height: 20px; left: 2px; top: 2px;
-    border-radius: 50%; background: #9db8ae; transition: 0.18s;
-  }
+  .slider { position: absolute; inset: 0; border-radius: 999px; background: #1b2c26; border: 1px solid var(--border); transition: 0.18s; cursor: pointer; }
+  .slider:before { content: ""; position: absolute; width: 20px; height: 20px; left: 2px; top: 2px; border-radius: 50%; background: #9db8ae; transition: 0.18s; }
   .switch input:checked + .slider { background: var(--accent-dim); border-color: var(--accent); }
   .switch input:checked + .slider:before { transform: translateX(20px); background: var(--accent); }
   .app-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; }
-  .app-chip {
-    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
-    border-radius: 10px; border: 1px solid var(--border); background: #0a1310;
-    font-size: 12.5px; cursor: pointer;
-  }
+  .app-chip { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border); background: #0a1310; font-size: 12px; cursor: pointer; }
   .app-chip input { accent-color: var(--accent); width: 16px; height: 16px; }
-  select, input[type="text"] {
+  .in-row { display: flex; gap: 6px; margin-top: 8px; }
+  select, input[type="text"], textarea {
     background: #09120f; border: 1px solid var(--border); border-radius: 9px;
-    color: var(--text); padding: 7px 10px; font-size: 13px; outline: none;
+    color: var(--text); padding: 7px 10px; font-size: 12.5px; outline: none; font-family: inherit;
   }
-  select:focus, input[type="text"]:focus { border-color: var(--accent); }
+  input[type="text"], textarea { flex: 1; min-width: 0; }
+  textarea { width: 100%; min-height: 70px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; margin-top: 6px; }
   .bar {
     position: fixed; left: 0; right: 0; bottom: 0;
     background: rgba(7,13,11,0.95); backdrop-filter: blur(12px);
-    border-top: 1px solid var(--border); padding: 12px 14px;
-    display: flex; gap: 8px;
+    border-top: 1px solid var(--border); padding: 12px 14px; display: flex; gap: 8px;
   }
-  .btn {
-    border: 1px solid var(--border); background: var(--card2); color: var(--text);
-    padding: 11px 14px; border-radius: 11px; font-size: 14px; font-weight: 700; cursor: pointer;
-  }
+  .btn { border: 1px solid var(--border); background: var(--card2); color: var(--text); padding: 10px 13px; border-radius: 11px; font-size: 13px; font-weight: 700; cursor: pointer; }
   .btn.primary { flex: 1; border-color: var(--accent); background: var(--accent); color: #04130c; }
+  .btn.danger { border-color: var(--danger); color: var(--danger); }
 </style>
 </head>
 <body>
@@ -103,37 +81,112 @@
   <div class="brand">
     <div class="logo">#</div>
     <div>
-      <h1>Pre-Boot Setup</h1>
-      <div class="sub">Configure Android BEFORE clicking Start Emulation</div>
+      <h1>Pre-Boot Studio v2</h1>
+      <div class="sub">Active Slot: <span class="badge" id="hdr-slot">default</span></div>
     </div>
   </div>
   <button class="btn" style="padding:7px 12px;font-size:12px;" onclick="closeSheet()">Close</button>
 </header>
 
 <div class="card">
-  <h2>1. Choose a Role Preset</h2>
-  <div class="preset-grid" id="preset-grid"></div>
+  <h2>1. Multi-VM Android Slots &amp; Hardware Tuning <span class="badge warn">Relaunch to apply</span></h2>
+  <div class="rd" style="margin-bottom:8px;">Each slot gets its own isolated Android disk, apps &amp; root profile inside one IPA.</div>
+  <div class="slot-row" id="slot-chips"></div>
+  <div class="in-row">
+    <input type="text" id="new-slot-in" placeholder="Create new slot (e.g. banking, re-lab)">
+    <button class="btn" style="padding:7px 12px;font-size:12px;" onclick="addSlot()">+ Slot</button>
+  </div>
+  <div class="row" style="margin-top:8px;">
+    <div><div class="rt">vCPU Cores</div><div class="rd" id="cpu-hint">Auto uses host optimal limit</div></div>
+    <select id="hw-vcpu"></select>
+  </div>
+  <div class="row">
+    <div><div class="rt">Guest RAM (MiB)</div><div class="rd">64 MiB step · Auto follows device memory class</div></div>
+    <select id="hw-mem">
+      <option value="0">Auto</option>
+      <option value="2048">2048 MiB (2 GB)</option>
+      <option value="3072">3072 MiB (3 GB)</option>
+      <option value="4096">4096 MiB (4 GB)</option>
+      <option value="5120">5120 MiB (5 GB)</option>
+      <option value="6144">6144 MiB (6 GB)</option>
+      <option value="8192">8192 MiB (8 GB)</option>
+    </select>
+  </div>
+  <div class="row">
+    <div><div class="rt">Android Data Disk (GiB)</div><div class="rd">New slots take size at once; existing slots can grow</div></div>
+    <select id="hw-disk">
+      <option value="0">Auto (8 GiB)</option>
+      <option value="8">8 GiB</option>
+      <option value="16">16 GiB</option>
+      <option value="32">32 GiB</option>
+      <option value="48">48 GiB</option>
+      <option value="64">64 GiB (Max)</option>
+    </select>
+  </div>
+  <div class="row">
+    <div><div class="rt">Display Scale</div><div class="rd">Native retina or crisp 1.0x–3.0x scaling</div></div>
+    <select id="hw-scale">
+      <option value="auto">Auto</option>
+      <option value="1.0">1.0x (Fastest)</option>
+      <option value="1.5">1.5x (Balanced)</option>
+      <option value="2.0">2.0x (Sharp)</option>
+      <option value="native">Native Retina</option>
+    </select>
+  </div>
+  <div class="row">
+    <div><div class="rt">Anti-Thermal Throttle (`nominal`)</div><div class="rd">Prevents FPS drop when iPhone/iPad warms up</div></div>
+    <label class="switch"><input type="checkbox" id="hw-thermal"><span class="slider"></span></label>
+  </div>
+  <div class="row">
+    <div><div class="rt">Live FPS / CPU / RAM Stats HUD</div><div class="rd">Native Andarium performance overlay</div></div>
+    <label class="switch"><input type="checkbox" id="hw-stats"><span class="slider"></span></label>
+  </div>
+  <div class="row">
+    <div><div class="rt">Silence Host Haptics</div><div class="rd">Disable iOS touch vibration feedback</div></div>
+    <label class="switch"><input type="checkbox" id="hw-haptics"><span class="slider"></span></label>
+  </div>
 </div>
 
 <div class="card">
-  <h2>2. Root &amp; Core Security</h2>
+  <h2>2. Role Presets &amp; Custom Presets <span class="badge">Instant on Start</span></h2>
+  <div class="preset-grid" id="preset-grid"></div>
+  <div class="in-row">
+    <input type="text" id="cp-name" placeholder="Save current setup as preset (e.g. my-pentest)">
+    <button class="btn" style="padding:7px 12px;font-size:12px;" onclick="saveCustomPreset()">Save Preset</button>
+  </div>
+  <textarea id="cp-import" placeholder="Paste a shared preset JSON here and tap Import..."></textarea>
+  <div class="in-row">
+    <button class="btn" style="padding:7px 12px;font-size:12px;" onclick="importPresetJson()">Import JSON</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>3. Root, Security &amp; Device Spoofing</h2>
   <div class="row">
     <div><div class="rt">Root Access (Magisk v31.1)</div><div class="rd">Toggle OFF for hidden/unrooted boot without wiping data</div></div>
     <label class="switch"><input type="checkbox" id="f-root"><span class="slider"></span></label>
   </div>
   <div class="row">
-    <div><div class="rt">Stealth Mode</div><div class="rd">Enforcing SELinux, DenyList ON, hides debuggable &amp; stops Frida/SSH</div></div>
+    <div><div class="rt">Stealth Mode</div><div class="rd">Enforcing SELinux, DenyList ON, hides debuggable &amp; daemons</div></div>
     <label class="switch"><input type="checkbox" id="f-stealth"><span class="slider"></span></label>
   </div>
   <div class="row">
-    <div><div class="rt">SELinux Policy</div><div class="rd">Permissive for root/RE, Enforcing for gaming/banking</div></div>
-    <select id="f-selinux">
-      <option value="permissive">Permissive</option>
-      <option value="enforcing">Enforcing</option>
+    <div><div class="rt">Device Identity / 120 FPS Spoof</div><div class="rd">Applied in post-fs-data before Zygote launches apps</div></div>
+    <select id="f-spoof">
+      <option value="stock">Stock (Kernarium)</option>
+      <option value="pixel9pro">Google Pixel 9 Pro</option>
+      <option value="s25ultra">Samsung S25 Ultra</option>
+      <option value="rog9">ROG Phone 9 Pro (120 FPS)</option>
+      <option value="redmagic10">RedMagic 10 Pro (Gaming)</option>
+      <option value="xiaomi15u">Xiaomi 15 Ultra</option>
     </select>
   </div>
   <div class="row">
-    <div><div class="rt">Native ADB Root</div><div class="rd">Unlock `adb root` while keeping default shell mode for iOS features</div></div>
+    <div><div class="rt">SELinux Policy</div><div class="rd">Permissive for root/RE, Enforcing for gaming/banking</div></div>
+    <select id="f-selinux"><option value="permissive">Permissive</option><option value="enforcing">Enforcing</option></select>
+  </div>
+  <div class="row">
+    <div><div class="rt">Native ADB Root</div><div class="rd">Unlock `adb root` while keeping default shell mode</div></div>
     <label class="switch"><input type="checkbox" id="f-adbroot"><span class="slider"></span></label>
   </div>
   <div class="row">
@@ -143,218 +196,256 @@
 </div>
 
 <div class="card">
-  <h2>3. Modules &amp; Services</h2>
-  <div class="row">
-    <div><div class="rt">ReZygisk</div><div class="rd">Standalone Zygisk runtime</div></div>
-    <label class="switch"><input type="checkbox" id="m-rezygisk"><span class="slider"></span></label>
-  </div>
-  <div class="row">
-    <div><div class="rt">Vector (LSPosed Android 17)</div><div class="rd">Xposed hooking framework (SSL bypass, FLAG_SECURE, GPS)</div></div>
-    <label class="switch"><input type="checkbox" id="m-vector"><span class="slider"></span></label>
-  </div>
-  <div class="row">
-    <div><div class="rt">Play Integrity &amp; Root-Hiding Stack</div><div class="rd">PlayIntegrityFork + TrickyStore + Zygisk-Assistant</div></div>
-    <label class="switch"><input type="checkbox" id="m-stealth-stack"><span class="slider"></span></label>
-  </div>
-  <div class="row">
-    <div><div class="rt">Systemless Ad-Block</div><div class="rd">StevenBlack unified hosts over /system/etc/hosts</div></div>
-    <label class="switch"><input type="checkbox" id="s-adblock"><span class="slider"></span></label>
-  </div>
-  <div class="row">
-    <div><div class="rt">Frida Server Autostart</div><div class="rd">Auto-launch frida-server on boot (port 27042)</div></div>
-    <label class="switch"><input type="checkbox" id="s-frida"><span class="slider"></span></label>
-  </div>
-  <div class="row">
-    <div><div class="rt">Dropbear SSH Autostart</div><div class="rd">Auto-launch SSH/SCP server on boot (port 2222)</div></div>
-    <label class="switch"><input type="checkbox" id="s-ssh"><span class="slider"></span></label>
-  </div>
-  <div class="row">
-    <div><div class="rt">Shizuku Auto-Start</div><div class="rd">Start privileged Shizuku server as root on boot</div></div>
-    <label class="switch"><input type="checkbox" id="s-shizuku"><span class="slider"></span></label>
-  </div>
-  <div class="row">
-    <div><div class="rt">Global HTTP Proxy</div><div class="rd">Optional Burp/mitmproxy host:port</div></div>
-    <input type="text" id="f-proxy" placeholder="off (host:port)" style="width:155px;">
-  </div>
+  <h2>4. Modules &amp; Services</h2>
+  <div class="row"><div><div class="rt">ReZygisk</div><div class="rd">Standalone Zygisk runtime</div></div><label class="switch"><input type="checkbox" id="m-rezygisk"><span class="slider"></span></label></div>
+  <div class="row"><div><div class="rt">Vector (LSPosed)</div><div class="rd">Android 17 Xposed framework</div></div><label class="switch"><input type="checkbox" id="m-vector"><span class="slider"></span></label></div>
+  <div class="row"><div><div class="rt">Stealth Stack</div><div class="rd">PlayIntegrityFork + TrickyStore + Zygisk-Assistant</div></div><label class="switch"><input type="checkbox" id="m-stealth"><span class="slider"></span></label></div>
+  <div class="row"><div><div class="rt">Systemless Ad-Block</div><div class="rd">StevenBlack unified hosts</div></div><label class="switch"><input type="checkbox" id="s-adblock"><span class="slider"></span></label></div>
+  <div class="row"><div><div class="rt">Frida Server Autostart</div><div class="rd">Bind 0.0.0.0:27042 at boot</div></div><label class="switch"><input type="checkbox" id="s-frida"><span class="slider"></span></label></div>
+  <div class="row"><div><div class="rt">Dropbear SSH Autostart</div><div class="rd">Start SSH on port 2222 at boot</div></div><label class="switch"><input type="checkbox" id="s-ssh"><span class="slider"></span></label></div>
+  <div class="row"><div><div class="rt">Shizuku Autostart</div><div class="rd">Launch privileged Shizuku server at boot</div></div><label class="switch"><input type="checkbox" id="s-shizuku"><span class="slider"></span></label></div>
 </div>
 
 <div class="card">
-  <h2>4. Preinstalled Apps (First Boot)</h2>
+  <h2>5. Preinstalled Apps (First Boot)</h2>
   <div class="app-grid" id="app-grid"></div>
 </div>
 
 <div class="card">
-  <h2>5. Performance &amp; Display Tweaks</h2>
+  <h2>6. Performance, Display &amp; Proxy</h2>
   <div class="row">
-    <div><div class="rt">Animation Scale</div><div class="rd">0x = instant (best for Gaming / Hacker)</div></div>
-    <select id="t-anim">
-      <option value="0">0x (Instant)</option>
-      <option value="0.5">0.5x (Snappy)</option>
-      <option value="1">1x (Stock)</option>
-    </select>
+    <div><div class="rt">Animation Scale</div><div class="rd">0x for fastest gaming &amp; UI</div></div>
+    <select id="t-anim"><option value="0">0x (Instant)</option><option value="0.5">0.5x (Snappy)</option><option value="1">1x (Stock)</option></select>
   </div>
   <div class="row">
-    <div><div class="rt">zRAM Swappiness</div><div class="rd">Higher compresses more RAM for heavy games/apps</div></div>
-    <select id="t-swap">
-      <option value="60">60 (Stock)</option>
-      <option value="80">80 (Balanced)</option>
-      <option value="100">100 (High)</option>
-      <option value="130">130 (Gamer Max)</option>
-    </select>
+    <div><div class="rt">zRAM Swappiness</div><div class="rd">Higher uses compressed RAM more aggressively</div></div>
+    <select id="t-swap"><option value="60">60 (Stock)</option><option value="80">80</option><option value="100">100 (Balanced)</option><option value="130">130 (Gamer)</option></select>
   </div>
   <div class="row">
-    <div><div class="rt">Display DPI</div><div class="rd">Override Android scaling density</div></div>
-    <select id="t-dpi">
-      <option value="0">Default</option>
-      <option value="320">320 DPI (Sharp)</option>
-      <option value="360">360 DPI (Compact)</option>
-      <option value="420">420 DPI (Balanced)</option>
-    </select>
-  </div>
-  <div class="row">
-    <div><div class="rt">Stay Awake</div><div class="rd">Keep guest display awake while running</div></div>
+    <div><div class="rt">Stay Awake</div><div class="rd">Prevent display sleep during RE or gaming</div></div>
     <label class="switch"><input type="checkbox" id="t-awake"><span class="slider"></span></label>
+  </div>
+  <div class="row">
+    <div><div class="rt">Display DPI</div><div class="rd">0 = device default</div></div>
+    <select id="t-dpi"><option value="0">Default</option><option value="320">320 (Compact)</option><option value="360">360 (Lab)</option><option value="420">420 (Standard)</option><option value="480">480 (Large)</option></select>
+  </div>
+  <div class="row">
+    <div><div class="rt">HTTP Proxy</div><div class="rd">Optional Burp/mitmproxy host:port</div></div>
+    <input type="text" id="t-proxy" placeholder="192.168.1.10:8080" style="max-width:170px;">
   </div>
 </div>
 
 <div class="bar">
-  <button class="btn" onclick="exportCfg()">Export JSON</button>
-  <button class="btn primary" onclick="saveCfg()">Save &amp; Apply on Start</button>
+  <button class="btn" onclick="exportConfig()">Export JSON</button>
+  <button class="btn primary" onclick="saveAndApply()">Save &amp; Apply</button>
 </div>
 
 <script>
-let DATA = { presets: {}, app_catalog: [] };
-let CFG = {};
+let DEFAULTS = { presets: {}, app_catalog: [] };
+let CUSTOM_PRESETS = {};
+let SLOT_CONFIGS = {};
+let SLOTS = ['default', 'pentest', 'gamer', 'privacy'];
+let ACTIVE_PRESET = 'mix';
+let SELECTED_SLOT = 'default';
+let HOST_CPUS = 6;
 
-function renderPresets() {
-  const g = document.getElementById("preset-grid");
-  g.innerHTML = "";
-  Object.entries(DATA.presets || {}).forEach(([id, p]) => {
-    const b = document.createElement("button");
-    b.className = "preset-btn" + (CFG.preset === id ? " active" : "");
-    b.onclick = () => applyPreset(id);
-    const t = document.createElement("div"); t.className = "pt"; t.textContent = p.name;
-    const d = document.createElement("div"); d.className = "pd"; d.textContent = p.tagline;
-    b.appendChild(t); b.appendChild(d);
-    g.appendChild(b);
-  });
-}
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-function renderApps() {
-  const g = document.getElementById("app-grid");
-  g.innerHTML = "";
-  const active = new Set(CFG.apps || []);
-  (DATA.app_catalog || []).forEach(app => {
-    const lbl = document.createElement("label");
-    lbl.className = "app-chip";
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.checked = active.has(app.id);
-    cb.dataset.appId = app.id;
-    const span = document.createElement("span");
-    span.textContent = app.label;
-    lbl.appendChild(cb); lbl.appendChild(span);
-    g.appendChild(lbl);
-  });
-}
-
-function syncFormFromCfg() {
-  document.getElementById("f-root").checked = CFG.root_enabled !== false;
-  document.getElementById("f-stealth").checked = Boolean(CFG.stealth);
-  document.getElementById("f-selinux").value = CFG.selinux || "permissive";
-  document.getElementById("f-adbroot").checked = CFG.adbroot !== false;
-  document.getElementById("f-dbg").checked = CFG.debuggable !== false;
-  document.getElementById("f-proxy").value = CFG.proxy || "";
-
-  const m = CFG.modules || {};
-  document.getElementById("m-rezygisk").checked = m.rezygisk !== false;
-  document.getElementById("m-vector").checked = m.vector !== false;
-  document.getElementById("m-stealth-stack").checked = m.stealth_stack !== false;
-
-  const s = CFG.services || {};
-  document.getElementById("s-adblock").checked = s.adblock !== false;
-  document.getElementById("s-frida").checked = Boolean(s.frida_autostart);
-  document.getElementById("s-ssh").checked = Boolean(s.ssh_autostart);
-  document.getElementById("s-shizuku").checked = s.shizuku_autostart !== false;
-
-  const t = CFG.tweaks || {};
-  document.getElementById("t-anim").value = String(t.anim_scale ?? "0.5");
-  document.getElementById("t-swap").value = String(t.swappiness ?? 100);
-  document.getElementById("t-dpi").value = String(t.dpi === "default" || !t.dpi ? "0" : t.dpi);
-  document.getElementById("t-awake").checked = Boolean(t.stay_awake);
-
-  renderPresets();
-  renderApps();
-}
-
-function applyPreset(id) {
-  const p = DATA.presets[id];
-  if (!p) return;
-  CFG = JSON.parse(JSON.stringify(p));
-  CFG.preset = id;
-  syncFormFromCfg();
-}
-
-function readCfgFromForm() {
-  const apps = [];
-  document.querySelectorAll("#app-grid input[type=checkbox]").forEach(cb => {
-    if (cb.checked) apps.push(cb.dataset.appId);
-  });
-  return {
-    preset: CFG.preset || "custom",
-    root_enabled: document.getElementById("f-root").checked,
-    stealth: document.getElementById("f-stealth").checked,
-    selinux: document.getElementById("f-selinux").value,
-    adbroot: document.getElementById("f-adbroot").checked,
-    debuggable: document.getElementById("f-dbg").checked,
-    proxy: document.getElementById("f-proxy").value.trim(),
-    modules: {
-      rezygisk: document.getElementById("m-rezygisk").checked,
-      vector: document.getElementById("m-vector").checked,
-      stealth_stack: document.getElementById("m-stealth-stack").checked,
-    },
-    services: {
-      adblock: document.getElementById("s-adblock").checked,
-      frida_autostart: document.getElementById("s-frida").checked,
-      ssh_autostart: document.getElementById("s-ssh").checked,
-      shizuku_autostart: document.getElementById("s-shizuku").checked,
-    },
-    tweaks: {
-      anim_scale: document.getElementById("t-anim").value,
-      swappiness: Number(document.getElementById("t-swap").value),
-      dpi: document.getElementById("t-dpi").value,
-      stay_awake: document.getElementById("t-awake").checked,
-    },
-    apps: apps,
-  };
-}
-
-function postNative(msg) {
+function post(msg) {
   if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.andariumPreboot) {
     window.webkit.messageHandlers.andariumPreboot.postMessage(msg);
   }
 }
 
-function saveCfg() {
-  CFG = readCfgFromForm();
-  postNative({ type: "save", config: CFG });
+window.__andariumInit = function(payload) {
+  DEFAULTS = payload.defaults || { presets: {}, app_catalog: [] };
+  CUSTOM_PRESETS = payload.custom_presets || {};
+  SLOT_CONFIGS = payload.slot_configs || {};
+  SLOTS = Array.isArray(payload.slots) && payload.slots.length ? payload.slots : SLOTS;
+  HOST_CPUS = payload.host_cpus || 6;
+  const hw = payload.hardware || {};
+  SELECTED_SLOT = hw.slot || payload.active_slot || 'default';
+  document.getElementById('hdr-slot').textContent = payload.active_slot || 'default';
+
+  const cpuSel = document.getElementById('hw-vcpu');
+  let opts = '<option value="0">Auto</option>';
+  for (let i = 1; i <= HOST_CPUS; i++) opts += `<option value="${i}">${i} vCPU${i>1?'s':''}</option>`;
+  cpuSel.innerHTML = opts;
+  document.getElementById('cpu-hint').textContent = `Host exposes ${HOST_CPUS} cores · Auto uses optimal limit`;
+
+  renderSlots();
+  applyHardware(hw);
+  renderPresets();
+  renderApps();
+  applyConfig(payload.config || {});
+};
+
+function renderSlots() {
+  document.getElementById('slot-chips').innerHTML = SLOTS.map(s =>
+    `<button class="slot-chip ${s===SELECTED_SLOT?'active':''}" onclick="selectSlot('${esc(s)}')">${esc(s)}</button>`
+  ).join('');
 }
-function exportCfg() {
-  postNative({ type: "export", text: JSON.stringify(readCfgFromForm(), null, 2) });
+function selectSlot(s) {
+  SLOT_CONFIGS[SELECTED_SLOT] = collectConfig();
+  SELECTED_SLOT = s;
+  renderSlots();
+  if (SLOT_CONFIGS[s]) applyConfig(SLOT_CONFIGS[s]);
 }
-function closeSheet() {
-  postNative({ type: "close" });
+function addSlot() {
+  const raw = document.getElementById('new-slot-in').value.trim().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32);
+  if (!raw) return;
+  if (!SLOTS.includes(raw)) SLOTS.push(raw);
+  SELECTED_SLOT = raw;
+  document.getElementById('new-slot-in').value = '';
+  renderSlots();
 }
 
-window.__andariumInit = function(payload) {
-  DATA = payload.defaults || DATA;
-  CFG = payload.config || {};
-  if (!CFG.preset && DATA.presets && DATA.presets.mix) {
-    applyPreset("mix");
-  } else {
-    syncFormFromCfg();
+function applyHardware(hw) {
+  document.getElementById('hw-vcpu').value = String(hw.vcpu || 0);
+  document.getElementById('hw-mem').value = String(hw.mem_mib || 0);
+  document.getElementById('hw-disk').value = String(hw.disk_gib || 0);
+  document.getElementById('hw-scale').value = hw.display_scale || 'auto';
+  document.getElementById('hw-thermal').checked = !!hw.thermal_nominal;
+  document.getElementById('hw-stats').checked = !!hw.stats_hud;
+  document.getElementById('hw-haptics').checked = !!hw.haptics_off;
+}
+
+function collectHardware() {
+  return {
+    slot: SELECTED_SLOT || 'default',
+    vcpu: parseInt(document.getElementById('hw-vcpu').value, 10) || 0,
+    mem_mib: parseInt(document.getElementById('hw-mem').value, 10) || 0,
+    disk_gib: parseInt(document.getElementById('hw-disk').value, 10) || 0,
+    display_scale: document.getElementById('hw-scale').value || 'auto',
+    thermal_nominal: document.getElementById('hw-thermal').checked,
+    stats_hud: document.getElementById('hw-stats').checked,
+    haptics_off: document.getElementById('hw-haptics').checked,
+  };
+}
+
+function renderPresets() {
+  const grid = document.getElementById('preset-grid');
+  grid.innerHTML = '';
+  const merged = [];
+  for (const [id, p] of Object.entries(DEFAULTS.presets || {})) merged.push([id, p, false]);
+  for (const [id, p] of Object.entries(CUSTOM_PRESETS || {})) merged.push([id, p, true]);
+  for (const [id, p, isCustom] of merged) {
+    const btn = document.createElement('button');
+    btn.className = 'preset-btn' + (ACTIVE_PRESET === id ? ' active' : '');
+    btn.innerHTML = `<div class="pt">${esc(p.name || id)}${isCustom ? ' ★' : ''}</div><div class="pd">${esc(p.tagline || 'Custom user preset')}</div>`;
+    btn.onclick = () => {
+      ACTIVE_PRESET = id;
+      applyConfig({ ...p, preset: id });
+      renderPresets();
+    };
+    if (isCustom) {
+      btn.oncontextmenu = (e) => {
+        e.preventDefault();
+        if (confirm('Delete custom preset "' + id + '"?')) {
+          delete CUSTOM_PRESETS[id];
+          post({ type: 'delete_custom_preset', id });
+          renderPresets();
+        }
+      };
+    }
+    grid.appendChild(btn);
   }
-};
+}
+
+function renderApps() {
+  const grid = document.getElementById('app-grid');
+  grid.innerHTML = (DEFAULTS.app_catalog || []).map(a =>
+    `<label class="app-chip"><input type="checkbox" data-app="${esc(a.id)}" checked><span>${esc(a.label)}</span></label>`
+  ).join('');
+}
+
+function applyConfig(cfg) {
+  ACTIVE_PRESET = cfg.preset || ACTIVE_PRESET || 'mix';
+  document.getElementById('f-root').checked = cfg.root_enabled !== false;
+  document.getElementById('f-stealth').checked = !!cfg.stealth;
+  document.getElementById('f-spoof').value = cfg.spoof_profile || 'stock';
+  document.getElementById('f-selinux').value = cfg.selinux === 'enforcing' ? 'enforcing' : 'permissive';
+  document.getElementById('f-adbroot').checked = cfg.adbroot !== false;
+  document.getElementById('f-dbg').checked = cfg.debuggable !== false;
+  const m = cfg.modules || {};
+  document.getElementById('m-rezygisk').checked = m.rezygisk !== false;
+  document.getElementById('m-vector').checked = m.vector !== false;
+  document.getElementById('m-stealth').checked = m.stealth_stack !== false;
+  const s = cfg.services || {};
+  document.getElementById('s-adblock').checked = s.adblock !== false;
+  document.getElementById('s-frida').checked = !!s.frida_autostart;
+  document.getElementById('s-ssh').checked = !!s.ssh_autostart;
+  document.getElementById('s-shizuku').checked = s.shizuku_autostart !== false;
+  const apps = new Set(cfg.apps || (DEFAULTS.app_catalog || []).map(a => a.id));
+  document.querySelectorAll('[data-app]').forEach(el => { el.checked = apps.has(el.dataset.app); });
+  const t = cfg.tweaks || {};
+  document.getElementById('t-anim').value = String(t.anim_scale ?? '0.5');
+  document.getElementById('t-swap').value = String(t.swappiness ?? '100');
+  document.getElementById('t-awake').checked = !!t.stay_awake;
+  document.getElementById('t-dpi').value = (!t.dpi || t.dpi === 'default') ? '0' : String(t.dpi);
+  document.getElementById('t-proxy').value = cfg.proxy && cfg.proxy !== 'none' ? cfg.proxy : '';
+  renderPresets();
+}
+
+function collectConfig() {
+  const apps = [];
+  document.querySelectorAll('[data-app]').forEach(el => { if (el.checked) apps.push(el.dataset.app); });
+  return {
+    preset: ACTIVE_PRESET,
+    root_enabled: document.getElementById('f-root').checked,
+    stealth: document.getElementById('f-stealth').checked,
+    spoof_profile: document.getElementById('f-spoof').value || 'stock',
+    selinux: document.getElementById('f-selinux').value,
+    adbroot: document.getElementById('f-adbroot').checked,
+    debuggable: document.getElementById('f-dbg').checked,
+    modules: {
+      rezygisk: document.getElementById('m-rezygisk').checked,
+      vector: document.getElementById('m-vector').checked,
+      stealth_stack: document.getElementById('m-stealth').checked,
+    },
+    services: {
+      adblock: document.getElementById('s-adblock').checked,
+      frida_autostart: document.getElementById('s-frida').checked,
+      ssh_autostart: document.getElementById('s-ssh').checked,
+      shizuku_autostart: document.getElementById('s-shizuku').checked,
+    },
+    apps,
+    tweaks: {
+      anim_scale: document.getElementById('t-anim').value,
+      swappiness: parseInt(document.getElementById('t-swap').value, 10) || 100,
+      stay_awake: document.getElementById('t-awake').checked,
+      dpi: document.getElementById('t-dpi').value,
+    },
+    proxy: document.getElementById('t-proxy').value.trim(),
+  };
+}
+
+function saveCustomPreset() {
+  const raw = document.getElementById('cp-name').value.trim();
+  const id = raw.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 24);
+  if (!id) return;
+  const p = { ...collectConfig(), name: raw, tagline: 'Custom preset (long-press to delete)' };
+  CUSTOM_PRESETS[id] = p;
+  ACTIVE_PRESET = id;
+  post({ type: 'save_custom_preset', id, preset: p });
+  document.getElementById('cp-name').value = '';
+  renderPresets();
+}
+
+function importPresetJson() {
+  try {
+    const obj = JSON.parse(document.getElementById('cp-import').value);
+    if (obj && typeof obj === 'object') {
+      if (obj.hardware) applyHardware(obj.hardware);
+      applyConfig(obj.config || obj);
+      document.getElementById('cp-import').value = '';
+    }
+  } catch (e) { alert('Invalid JSON: ' + e.message); }
+}
+
+function saveAndApply() { post({ type: 'save', config: collectConfig(), hardware: collectHardware() }); }
+function exportConfig() { post({ type: 'export', text: JSON.stringify({ config: collectConfig(), hardware: collectHardware() }, null, 2) }); }
+function closeSheet() { post({ type: 'close' }); }
 </script>
 </body>
 </html>

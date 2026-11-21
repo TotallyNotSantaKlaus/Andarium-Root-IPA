@@ -50,6 +50,7 @@ sys.path.insert(0, str(SCRIPTS))
 import build_rooted_ipa as builder  # noqa: E402
 import macho_inject  # noqa: E402
 import studio_web  # noqa: E402
+import update_artifacts  # noqa: E402
 import verify_rooted_ipa as verifier  # noqa: E402
 
 
@@ -60,6 +61,10 @@ def ok(msg: str) -> None:
 def test_guest_shell_scripts() -> None:
     guest_scripts = [
         ROOT / "scripts/guest/andarium-ctl",
+        ROOT / "scripts/guest/andarium-workbench",
+        ROOT / "scripts/guest/andarium-spoof",
+        ROOT / "scripts/guest/andarium-net",
+        ROOT / "scripts/guest/andarium-auto",
         ROOT / "scripts/guest/andarium_early_init.sh",
         ROOT / "scripts/guest/andarium_boot_complete.sh",
         ROOT / "scripts/guest/andarium-termux-setup",
@@ -80,7 +85,7 @@ def test_guest_shell_scripts() -> None:
         finally:
             tp.unlink(missing_ok=True)
 
-    # Verify bundled Frida bypass scripts & iOS pre-boot assets exist cleanly
+    # Verify bundled Frida bypass scripts & iOS pre-boot v2 assets exist cleanly
     frida_scripts = sorted((ROOT / "scripts/guest/frida_scripts").glob("*.js"))
     assert len(frida_scripts) == 5, f"Expected 5 Frida scripts, found {len(frida_scripts)}"
     for js in frida_scripts:
@@ -90,7 +95,19 @@ def test_guest_shell_scripts() -> None:
         p = ROOT / "ios/AndariumRootPreboot" / ios_src
         assert p.is_file() and p.stat().st_size > 200, f"Missing iOS preboot file: {p}"
 
-    ok(f"all {len(guest_scripts)} guest scripts (sh -n), 5 Frida JS scripts & 4 iOS Pre-Boot sources valid")
+    m_src = (ROOT / "ios/AndariumRootPreboot/AndariumRootPreboot.m").read_text(encoding="utf-8")
+    for env_sym in (
+        "ANDARIUM_GUEST_INSTANCE",
+        "KERNARIUM_VCPU_COUNT",
+        "KERNARIUM_GUEST_MEMORY_MIB",
+        "KERNARIUM_ANDROID_DISK_SIZE_GIB",
+        "KERNARIUM_DISPLAY_SCALE",
+        "ANDARIUM_THERMAL_STATE",
+        "ANDARIUM_HAPTICS",
+    ):
+        assert f'"{env_sym}"' in m_src, f"Missing verified env override in AndariumRootPreboot.m: {env_sym}"
+
+    ok(f"all {len(guest_scripts)} guest scripts (sh -n), 5 Frida JS scripts & iOS Pre-Boot v2 sources valid")
 
 
 def test_presets_and_icons() -> None:
@@ -105,9 +122,14 @@ def test_presets_and_icons() -> None:
 
     presets = presets_doc["presets"]
     assert set(presets.keys()) == set(builder.PRESET_NAMES)
+    dev_prof = json.loads((ROOT / "manifests/device_profiles.json").read_text(encoding="utf-8"))
+    prof_ids = set(dev_prof["profiles"].keys())
+    assert prof_ids >= {"stock", "pixel9pro", "s25ultra", "rog9", "redmagic10", "xiaomi15u"}
+    assert "frida_inject" in artifacts["tools"], "Missing tools.frida_inject in artifacts.json"
     for pid, p in presets.items():
         assert p["icon_theme"] in builder.ICON_THEMES, f"Bad icon_theme in {pid}"
         assert set(p["apps"]).issubset(catalog_ids), f"Unknown app in preset {pid}"
+        assert p.get("spoof_profile", "stock") in prof_ids, f"Unknown spoof_profile in {pid}"
 
     for theme in ("duskjade", "crimson", "cyber", "stealth"):
         tdir = builder.resolve_icon_dir(theme)
@@ -152,6 +174,10 @@ def test_profiles_and_presets() -> None:
     gam = parse_with(["--preset", "gamer"])
     assert gam.icon_theme == "cyber" and gam.selinux == "enforcing" and gam.default_stealth == "on"
     assert gam.effective_config["tweaks"]["anim_scale"] == "0" and gam.effective_config["tweaks"]["swappiness"] == 130
+    assert gam.effective_config["spoof_profile"] == "rog9"
+
+    sp_ov = parse_with(["--preset", "mix", "--spoof", "s25ultra"])
+    assert sp_ov.effective_config["spoof_profile"] == "s25ultra"
 
     unr = parse_with(["--preset", "unrooted", "--no-root", "--icon-theme", "stealth"])
     assert unr.no_root and unr.icon_theme == "stealth" and unr.release_suffix == "clean"
@@ -280,9 +306,11 @@ def test_custom_dropins() -> None:
         (cdir / "hosts").write_bytes(b"127.0.0.1 test.local\r\n")
         (cdir / "authorized_keys").write_bytes(b"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKey user@pc\r\n")
         (cdir / "root-packages.txt").write_bytes(b"# comment\r\ncom.example.tool\r\n")
+        (cdir / "keybox.xml").write_bytes(b"<AndroidAttestation><Keybox DeviceID=\"test\"/></AndroidAttestation>\r\n")
 
         hosts_out = builder.stage_custom_dropins(cdir, pdir)
         assert hosts_out is not None and hosts_out.is_file()
+        assert (pdir / "keybox.xml").is_file() and b"\r" not in (pdir / "keybox.xml").read_bytes()
         certs = sorted((pdir / "certs").glob("*.0"))
         assert len(certs) == 2
         for c in certs:
@@ -340,9 +368,17 @@ def test_control_panel_v4_cgi() -> None:
         )
         mock_ctl.chmod(0o755)
 
+        mock_sub = tdp / "mock-sub"
+        mock_sub.write_text("#!/bin/sh\necho \"SUB:$*\"\nexit 0\n")
+        mock_sub.chmod(0o755)
+
         api_src = builder.read_text_lf(ROOT / "scripts/guest/control_module/webroot/cgi-bin/api").decode("utf-8")
         api_src = api_src.replace("#!/system/bin/sh", "#!/bin/sh")
         api_src = api_src.replace('CTL="/odm/andarium-root/scripts/andarium-ctl"', f'CTL="{mock_ctl}"')
+        api_src = api_src.replace('WB="/odm/andarium-root/scripts/andarium-workbench"', f'WB="{mock_sub}"')
+        api_src = api_src.replace('SPOOF="/odm/andarium-root/scripts/andarium-spoof"', f'SPOOF="{mock_sub}"')
+        api_src = api_src.replace('NET="/odm/andarium-root/scripts/andarium-net"', f'NET="{mock_sub}"')
+        api_src = api_src.replace('AUTO="/odm/andarium-root/scripts/andarium-auto"', f'AUTO="{mock_sub}"')
         api_src = api_src.replace('TOKEN_FILE="/data/adb/andarium/run/webui.token"', f'TOKEN_FILE="{tok_file}"')
         api_src = api_src.replace('BB="/data/adb/magisk/busybox"', f'BB="{bb}"')
         api_p = webroot / "cgi-bin" / "api"
@@ -362,7 +398,7 @@ def test_control_panel_v4_cgi() -> None:
                     return e.code, e.read().decode("utf-8")
 
             st, body = req("/")
-            assert st == 200 and "Andarium Root" in body and "v4" in body
+            assert st == 200 and "Andarium Root" in body and "v5" in body
 
             # Auth enforcement
             assert req("/cgi-bin/api?action=status")[0] == 403
@@ -414,7 +450,25 @@ def test_control_panel_v4_cgi() -> None:
             st, body = req(f"/cgi-bin/api?token={tok}&action=module_disable&value=zygisk_vector")
             assert st == 200 and "MOCK:module disable zygisk_vector" in body
 
-            # Security / injection / lockout rejections
+            # v5 endpoints (Workbench, Spoof, Net/Firewall, Automation)
+            st, body = req(f"/cgi-bin/api?token={tok}&action=wb_frida_run&value=spawn&p2=com.example.app&p3=ssl-pinning-bypass.js")
+            assert st == 200 and "SUB:frida-run spawn com.example.app ssl-pinning-bypass.js" in body
+            st, body = req(f"/cgi-bin/api?token={tok}&action=spoof_set&value=rog9")
+            assert st == 200 and "SUB:set-profile rog9" in body
+            st, body = req(f"/cgi-bin/api?token={tok}&action=spoof_ts_add&value=com.google.android.gms&p2=generate")
+            assert st == 200 and "SUB:ts-add com.google.android.gms generate" in body
+            st, body = req(f"/cgi-bin/api?token={tok}&action=net_fw_block&value=com.tracker.app")
+            assert st == 200 and "SUB:fw-block com.tracker.app" in body
+            st, body = req(f"/cgi-bin/api?token={tok}&action=net_tproxy_set&value=192.168.1.10:8080&p2=all&p3=80,443")
+            assert st == 200 and "SUB:tproxy-set 192.168.1.10:8080 all 80,443" in body
+            st, body = req(f"/cgi-bin/api?token={tok}&action=net_dns_set&value=cloudflare")
+            assert st == 200 and "SUB:dns-set cloudflare" in body
+            st, body = req(f"/cgi-bin/api?token={tok}&action=auto_freeze&value=org.lineageos.jelly")
+            assert st == 200 and "SUB:freeze org.lineageos.jelly" in body
+            st, body = req(f"/cgi-bin/api?token={tok}&action=auto_macro&value=clean-caches")
+            assert st == 200 and "SUB:macro clean-caches" in body
+
+            # Security / injection / path-traversal / lockout rejections (v4 + v5)
             assert req(f"/cgi-bin/api?token={tok}&action=mode&value=invalid")[0] == 400
             assert req(f"/cgi-bin/api?token={tok}&action=root&value=rm")[0] == 400
             assert req(f"/cgi-bin/api?token={tok}&action=tweaks_anim&value=5")[0] == 400
@@ -425,11 +479,17 @@ def test_control_panel_v4_cgi() -> None:
             assert req(f"/cgi-bin/api?token={tok}&action=proxy_set&value=" + urllib.parse.quote("1.2.3.4:80;id"))[0] == 400
             assert req(f"/cgi-bin/api?token={tok}&action=module_disable&value=andarium_control")[0] == 400
             assert req(f"/cgi-bin/api?token={tok}&action=module_disable&value=" + urllib.parse.quote("../etc"))[0] == 400
+            assert req(f"/cgi-bin/api?token={tok}&action=wb_frida_run&value=eval")[0] == 400
+            assert req(f"/cgi-bin/api?token={tok}&action=wb_inspect_xml&value=com.app&p2=" + urllib.parse.quote("../../etc/hosts"))[0] == 400
+            assert req(f"/cgi-bin/api?token={tok}&action=spoof_set&value=evil_profile")[0] == 400
+            assert req(f"/cgi-bin/api?token={tok}&action=net_fw_block&value=" + urllib.parse.quote("com.a;reboot"))[0] == 400
+            assert req(f"/cgi-bin/api?token={tok}&action=auto_macro&value=rm_rf")[0] == 400
+            assert req(f"/cgi-bin/api?token={tok}&action=auto_script_run&value=" + urllib.parse.quote("../evil.sh"))[0] == 400
             assert req(f"/cgi-bin/api?token={tok}&action=exec&value=id")[0] == 400
         finally:
             proc.terminate()
             proc.wait(timeout=3)
-    ok("Control Panel v4 live busybox httpd + CGI allowlist/security/lockout tests passed")
+    ok("Control Panel v5 live busybox httpd + CGI allowlist/security/path-traversal tests passed")
 
 
 def test_studio_web_server() -> None:
@@ -444,24 +504,76 @@ def test_studio_web_server() -> None:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/meta", timeout=5) as r:
             meta = json.loads(r.read().decode("utf-8"))
             assert len(meta["presets"]) == 6 and len(meta["app_catalog"]) == 13
+            assert len(meta["device_profiles"]) == 6
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/icons/icon-crimson.png", timeout=5) as r:
             assert r.status == 200 and r.read().startswith(verifier.PNG_MAGIC)
         # CSRF token enforcement on POST
-        req = urllib.request.Request(
-            f"http://127.0.0.1:{port}/api/build",
-            data=b'{"config":{}}',
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            urllib.request.urlopen(req, timeout=5)
-            raise AssertionError("Expected 403 without X-Studio-Token")
-        except urllib.error.HTTPError as e:
-            assert e.code == 403
+        for ep in ("/api/build", "/api/presets/save", "/api/updates/check"):
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}{ep}",
+                data=b'{"config":{}}',
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(req, timeout=5)
+                raise AssertionError(f"Expected 403 without X-Studio-Token on {ep}")
+            except urllib.error.HTTPError as e:
+                assert e.code == 403
     finally:
         srv.shutdown()
         srv.server_close()
-    ok("Local Web Builder Studio (studio_web.py) HTML, /api/meta, icon previews & CSRF enforcement verified")
+    ok("Local Web Builder Studio v5 HTML, /api/meta (device_profiles), icon previews & CSRF enforcement verified")
+
+
+def test_upstream_artifact_updater() -> None:
+    with tempfile.TemporaryDirectory(prefix="test_updater_") as td:
+        tdp = pathlib.Path(td)
+        man_path = tdp / "artifacts.json"
+        cache_dir = tdp / "cache"
+        orig_manifest = json.loads((ROOT / "manifests/artifacts.json").read_text(encoding="utf-8"))
+        man_path.write_text(json.dumps(orig_manifest, indent=2), encoding="utf-8")
+
+        # Mock fetcher: pretend Magisk has v32.0 while ReZygisk is up-to-date
+        cur_rz_url = orig_manifest["modules"]["rezygisk"]["url"]
+        cur_rz_name = cur_rz_url.rsplit("/", 1)[-1]
+
+        def fake_fetch(repo: str) -> tuple[str, list[tuple[str, str]]]:
+            if repo == "topjohnwu/Magisk":
+                return "v32.0", [("Magisk-v32.0.apk", "https://example.invalid/Magisk-v32.0.apk")]
+            if repo == "PerformanC/ReZygisk":
+                return "v1.0.0", [(cur_rz_name, cur_rz_url)]
+            raise RuntimeError(f"unexpected repo: {repo}")
+
+        rows = update_artifacts.check_updates(
+            orig_manifest, only={"magisk", "modules.rezygisk"}, fetcher=fake_fetch
+        )
+        by_key = {r["key"]: r for r in rows}
+        assert by_key["magisk"]["status"] == "update_available"
+        assert by_key["modules.rezygisk"]["status"] == "up_to_date"
+
+        # Test corrupt download rejection does NOT touch manifest
+        def bad_dl(_url: str, dest: pathlib.Path) -> None:
+            dest.write_bytes(b"corrupt garbage bytes" * 30)
+
+        applied_bad = update_artifacts.apply_updates(man_path, rows, cache_dir=cache_dir, downloader=bad_dl)
+        assert len(applied_bad) == 0 and not by_key["magisk"].get("applied")
+        assert json.loads(man_path.read_text(encoding="utf-8"))["magisk"]["version"] == orig_manifest["magisk"]["version"]
+
+        # Test valid ZIP download applies cleanly, updates SHA-256/size & writes .bak
+        def good_dl(_url: str, dest: pathlib.Path) -> None:
+            with zipfile.ZipFile(dest, "w") as zf:
+                zf.writestr("AndroidManifest.xml", b"dummy" * 100)
+
+        by_key["magisk"]["error"] = ""
+        applied_ok = update_artifacts.apply_updates(man_path, rows, cache_dir=cache_dir, downloader=good_dl)
+        assert len(applied_ok) == 1
+        updated = json.loads(man_path.read_text(encoding="utf-8"))
+        assert updated["magisk"]["version"] == "32.0"
+        assert updated["magisk"]["name"] == "Magisk-v32.0.apk"
+        assert (tdp / "artifacts.json.bak").is_file()
+        assert (cache_dir / "Magisk-v32.0.apk").is_file()
+    ok("Upstream Auto-Updater (update_artifacts.py) mock diff, corrupt rejection & atomic apply verified")
 
 
 def test_altstore_source_generator() -> None:
@@ -503,8 +615,9 @@ def main() -> int:
     test_custom_dropins()
     test_control_panel_v4_cgi()
     test_studio_web_server()
+    test_upstream_artifact_updater()
     test_altstore_source_generator()
-    print("[test] ALL V4 REGRESSION & SECURITY TESTS PASSED!", flush=True)
+    print("[test] ALL V5 REGRESSION & SECURITY TESTS PASSED!", flush=True)
     return 0
 
 

@@ -1,0 +1,359 @@
+#!/system/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
+# andarium-spoof — Device Identity, 120 FPS Gaming Spoofer, SSAID Changer &
+# TrickyStore target.txt / keybox.xml Manager for Andarium Root v5.
+
+STATE_DIR="/data/adb/andarium"
+SPOOF_CONF="$STATE_DIR/spoof.conf"
+SPOOF_PROFILE_FILE="$STATE_DIR/spoof_profile"
+ODM_ROOT="/odm/andarium-root"
+PROFILES_JSON="$ODM_ROOT/config/device-profiles.json"
+TS_DIR="/data/adb/tricky_store"
+SSAID_FILE="/data/system/users/0/settings_ssaid.xml"
+
+BB="/data/adb/magisk/busybox"
+[ -x "$BB" ] || BB="$ODM_ROOT/magisk-bin/busybox"
+JQ="$ODM_ROOT/tools/cli/jq"
+[ -x "$JQ" ] || JQ="$(command -v jq 2>/dev/null || echo /odm/andarium-root/tools/cli/jq)"
+MAGISK="$(command -v magisk 2>/dev/null || echo /debug_ramdisk/magisk)"
+[ -x "$MAGISK" ] || MAGISK="/sbin/magisk"
+
+if [ "$(id -u)" != "0" ]; then
+    echo "andarium-spoof: must be run as root" >&2
+    exit 1
+fi
+
+mkdir -p "$STATE_DIR" "$TS_DIR" 2>/dev/null
+chmod 0700 "$STATE_DIR" 2>/dev/null
+
+json_escape() {
+    printf '%s' "$1" | "$BB" sed 's/\\/\\\\/g; s/"/\\"/g' | "$BB" tr '\r\n' '  '
+}
+
+valid_pkg() {
+    case "$1" in
+        ''|*[!A-Za-z0-9_.]*|*..*) return 1 ;;
+        *.*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+valid_prop_val() {
+    case "$1" in
+        *[!A-Za-z0-9_./:\ -]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+apply_prop() {
+    k="$1"
+    v="$2"
+    [ -n "$k" ] && [ -n "$v" ] || return 0
+    if command -v resetprop >/dev/null 2>&1; then
+        resetprop -n "$k" "$v" 2>/dev/null || resetprop "$k" "$v" 2>/dev/null || true
+    elif [ -x "$MAGISK" ]; then
+        "$MAGISK" resetprop -n "$k" "$v" 2>/dev/null || "$MAGISK" resetprop "$k" "$v" 2>/dev/null || true
+    fi
+}
+
+apply_partition_mirrors() {
+    key="$1"
+    val="$2"
+    apply_prop "$key" "$val"
+    case "$key" in
+        ro.product.*)
+            suffix="${key#ro.product.}"
+            for part in system vendor odm product system_ext; do
+                apply_prop "ro.product.${part}.${suffix}" "$val"
+            done
+            ;;
+        ro.build.fingerprint)
+            for part in system vendor odm product system_ext bootimage; do
+                apply_prop "ro.${part}.build.fingerprint" "$val"
+            done
+            ;;
+    esac
+}
+
+# ── DEVICE IDENTITY & 120 FPS SPOOFER ──────────────────────────────────────
+
+cmd_profiles() {
+    if [ -f "$PROFILES_JSON" ]; then
+        cat "$PROFILES_JSON"
+    else
+        echo '{"profiles":{"stock":{"name":"Stock","tagline":"Default","category":"stock","props":{}}}}'
+    fi
+}
+
+cmd_apply_saved() {
+    [ -f "$SPOOF_CONF" ] || return 0
+    while IFS='=' read -r k v; do
+        case "$k" in ''|'#'*) continue ;; esac
+        apply_partition_mirrors "$k" "$v"
+    done < "$SPOOF_CONF"
+}
+
+cmd_set_profile() {
+    prof="$1"
+    case "$prof" in
+        stock|pixel9pro|s25ultra|rog9|redmagic10|xiaomi15u) ;;
+        *) echo "unknown device profile: $prof" >&2; return 1 ;;
+    esac
+    printf '%s\n' "$prof" > "$SPOOF_PROFILE_FILE"
+    chmod 0600 "$SPOOF_PROFILE_FILE" 2>/dev/null
+
+    if [ "$prof" = "stock" ]; then
+        rm -f "$SPOOF_CONF"
+        echo "device spoof cleared (stock restored on next reboot)"
+        return 0
+    fi
+
+    if [ ! -f "$PROFILES_JSON" ] || [ ! -x "$JQ" ]; then
+        echo "device-profiles.json or jq missing" >&2
+        return 1
+    fi
+
+    tmp="$SPOOF_CONF.tmp"
+    "$JQ" -r --arg p "$prof" '.profiles[$p].props | to_entries[] | "\(.key)=\(.value)"' "$PROFILES_JSON" > "$tmp" 2>/dev/null
+    if [ ! -s "$tmp" ]; then
+        rm -f "$tmp"
+        echo "profile '$prof' has no props" >&2
+        return 1
+    fi
+    mv "$tmp" "$SPOOF_CONF"
+    chmod 0600 "$SPOOF_CONF"
+    cmd_apply_saved
+    echo "applied device profile '$prof' (takes full effect for newly launched apps & persisted at early boot)"
+}
+
+cmd_set_custom() {
+    brand="$1"
+    manuf="$2"
+    model="$3"
+    device="$4"
+    fp="$5"
+    for v in "$brand" "$manuf" "$model" "$device" "$fp"; do
+        valid_prop_val "$v" || { echo "invalid characters in custom prop value" >&2; return 1; }
+    done
+    [ -n "$model" ] || { echo "model is required" >&2; return 1; }
+    printf '%s\n' "custom" > "$SPOOF_PROFILE_FILE"
+    {
+        [ -n "$brand" ]  && printf 'ro.product.brand=%s\n' "$brand"
+        [ -n "$manuf" ]  && printf 'ro.product.manufacturer=%s\n' "$manuf"
+        [ -n "$model" ]  && printf 'ro.product.model=%s\n' "$model"
+        [ -n "$device" ] && printf 'ro.product.device=%s\n' "$device"
+        [ -n "$device" ] && printf 'ro.product.name=%s\n' "$device"
+        [ -n "$fp" ]     && printf 'ro.build.fingerprint=%s\n' "$fp"
+    } > "$SPOOF_CONF"
+    chmod 0600 "$SPOOF_CONF"
+    cmd_apply_saved
+    echo "applied custom device identity ($model)"
+}
+
+cmd_status() {
+    active="stock"
+    [ -f "$SPOOF_PROFILE_FILE" ] && active="$(cat "$SPOOF_PROFILE_FILE" 2>/dev/null | tr -d '\r\n ')"
+    [ -n "$active" ] || active="stock"
+    kb_present="false"
+    kb_size="0"
+    if [ -f "$TS_DIR/keybox.xml" ]; then
+        kb_present="true"
+        kb_size="$(wc -c < "$TS_DIR/keybox.xml" 2>/dev/null | tr -d ' ')"
+    fi
+    ts_count="0"
+    if [ -f "$TS_DIR/target.txt" ]; then
+        ts_count="$(grep -c '^[A-Za-z0-9_.]' "$TS_DIR/target.txt" 2>/dev/null || echo 0)"
+    fi
+    printf '{"profile":"%s","brand":"%s","manufacturer":"%s","model":"%s","device":"%s","fingerprint":"%s","keybox_present":%s,"keybox_size":%s,"trickystore_targets":%s}\n' \
+        "$(json_escape "$active")" \
+        "$(json_escape "$(getprop ro.product.brand 2>/dev/null)")" \
+        "$(json_escape "$(getprop ro.product.manufacturer 2>/dev/null)")" \
+        "$(json_escape "$(getprop ro.product.model 2>/dev/null)")" \
+        "$(json_escape "$(getprop ro.product.device 2>/dev/null)")" \
+        "$(json_escape "$(getprop ro.build.fingerprint 2>/dev/null)")" \
+        "$kb_present" "${kb_size:-0}" "${ts_count:-0}"
+}
+
+# ── PER-APP SSAID / ANDROID ID MANAGER ─────────────────────────────────────
+
+ssaid_read_xml() {
+    [ -f "$SSAID_FILE" ] || return 1
+    magic="$(dd if="$SSAID_FILE" bs=1 count=3 2>/dev/null)"
+    if [ "$magic" = "ABX" ] && command -v abx2xml >/dev/null 2>&1; then
+        abx2xml "$SSAID_FILE" - 2>/dev/null
+    else
+        cat "$SSAID_FILE" 2>/dev/null
+    fi
+}
+
+cmd_ssaid_list() {
+    xml="$(ssaid_read_xml)" || { echo '[]'; return 0; }
+    printf '['
+    first=1
+    printf '%s\n' "$xml" | grep 'package="' | while IFS= read -r line; do
+        pkg="$(printf '%s' "$line" | "$BB" sed -n 's/.*package="\([^"]*\)".*/\1/p')"
+        val="$(printf '%s' "$line" | "$BB" sed -n 's/.*value="\([^"]*\)".*/\1/p')"
+        [ -n "$pkg" ] && [ -n "$val" ] || continue
+        [ "$first" = "1" ] || printf ','
+        first=0
+        printf '{"package":"%s","ssaid":"%s"}' "$(json_escape "$pkg")" "$(json_escape "$val")"
+    done
+    printf ']\n'
+}
+
+cmd_ssaid_set() {
+    pkg="$1"
+    newid="$2"
+    valid_pkg "$pkg" || { echo "invalid package" >&2; return 1; }
+    if [ "$newid" = "random" ] || [ -z "$newid" ]; then
+        newid="$(od -An -tx1 -N8 /dev/urandom 2>/dev/null | tr -d ' \n\r')"
+    fi
+    case "$newid" in
+        [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]) ;;
+        *) echo "SSAID must be 16 hex characters" >&2; return 1 ;;
+    esac
+    [ -f "$SSAID_FILE" ] || { echo "settings_ssaid.xml not found" >&2; return 1; }
+
+    cp -f "$SSAID_FILE" "$STATE_DIR/settings_ssaid.xml.bak" 2>/dev/null || true
+    tmp_xml="$STATE_DIR/ssaid_edit.xml"
+    is_abx="0"
+    magic="$(dd if="$SSAID_FILE" bs=1 count=3 2>/dev/null)"
+    if [ "$magic" = "ABX" ]; then
+        is_abx="1"
+        command -v abx2xml >/dev/null 2>&1 && command -v xml2abx >/dev/null 2>&1 || {
+            echo "abx2xml/xml2abx unavailable on this system" >&2
+            return 1
+        }
+        abx2xml "$SSAID_FILE" "$tmp_xml" 2>/dev/null || { echo "failed to decode ABX" >&2; return 1; }
+    else
+        cp -f "$SSAID_FILE" "$tmp_xml"
+    fi
+
+    if ! grep -q "package=\"$pkg\"" "$tmp_xml"; then
+        rm -f "$tmp_xml"
+        echo "package $pkg has no SSAID entry yet (open the app once first)" >&2
+        return 1
+    fi
+
+    tmp_out="$STATE_DIR/ssaid_edit.out.xml"
+    "$BB" awk -v pkg="$pkg" -v nid="$newid" '
+        index($0, "package=\"" pkg "\"") > 0 {
+            sub(/value="[0-9a-fA-F]+"/, "value=\"" nid "\"")
+            sub(/defaultValue="[0-9a-fA-F]+"/, "defaultValue=\"" nid "\"")
+        }
+        { print }
+    ' "$tmp_xml" > "$tmp_out"
+
+    if [ "$is_abx" = "1" ]; then
+        xml2abx "$tmp_out" "$SSAID_FILE.new" 2>/dev/null && mv -f "$SSAID_FILE.new" "$SSAID_FILE"
+    else
+        mv -f "$tmp_out" "$SSAID_FILE"
+    fi
+    chmod 0600 "$SSAID_FILE" 2>/dev/null
+    chown 1000:1000 "$SSAID_FILE" 2>/dev/null || true
+    rm -f "$tmp_xml" "$tmp_out" "$SSAID_FILE.new"
+    am force-stop "$pkg" 2>/dev/null || true
+    echo "updated SSAID for $pkg -> $newid (reboot or relaunch app to apply)"
+}
+
+# ── TRICKYSTORE TARGET.TXT & KEYBOX.XML MANAGER ────────────────────────────
+
+cmd_ts_list() {
+    printf '['
+    first=1
+    if [ -f "$TS_DIR/target.txt" ]; then
+        while IFS= read -r line; do
+            clean="$(printf '%s' "$line" | tr -d '\r\n ')"
+            case "$clean" in ''|'#'*) continue ;; esac
+            mode="auto"
+            pkg="$clean"
+            case "$clean" in
+                *'!') mode="generate"; pkg="${clean%!}" ;;
+                *'?') mode="leaf"; pkg="${clean%?}" ;;
+            esac
+            [ "$first" = "1" ] || printf ','
+            first=0
+            printf '{"package":"%s","mode":"%s","raw":"%s"}' \
+                "$(json_escape "$pkg")" "$mode" "$(json_escape "$clean")"
+        done < "$TS_DIR/target.txt"
+    fi
+    printf ']\n'
+}
+
+cmd_ts_add() {
+    pkg="$1"
+    mode="${2:-auto}" # auto | generate (!) | leaf (?)
+    valid_pkg "$pkg" || { echo "invalid package" >&2; return 1; }
+    suffix=""
+    case "$mode" in
+        generate|'!') suffix="!" ;;
+        leaf|'?')     suffix="?" ;;
+        auto|'')      suffix="" ;;
+        *) echo "invalid mode: $mode" >&2; return 1 ;;
+    esac
+    touch "$TS_DIR/target.txt"
+    pkg_esc="$(printf '%s' "$pkg" | "$BB" sed 's/\./\\./g')"
+    grep -v -E "^${pkg_esc}[!?]?$" "$TS_DIR/target.txt" > "$TS_DIR/target.txt.tmp" 2>/dev/null || true
+    printf '%s%s\n' "$pkg" "$suffix" >> "$TS_DIR/target.txt.tmp"
+    mv "$TS_DIR/target.txt.tmp" "$TS_DIR/target.txt"
+    chmod 0600 "$TS_DIR/target.txt"
+    echo "added ${pkg}${suffix} to TrickyStore target.txt"
+}
+
+cmd_ts_remove() {
+    pkg="$1"
+    valid_pkg "$pkg" || { echo "invalid package" >&2; return 1; }
+    [ -f "$TS_DIR/target.txt" ] || { echo "removed $pkg"; return 0; }
+    pkg_esc="$(printf '%s' "$pkg" | "$BB" sed 's/\./\\./g')"
+    grep -v -E "^${pkg_esc}[!?]?$" "$TS_DIR/target.txt" > "$TS_DIR/target.txt.tmp" 2>/dev/null || true
+    mv "$TS_DIR/target.txt.tmp" "$TS_DIR/target.txt"
+    chmod 0600 "$TS_DIR/target.txt"
+    echo "removed $pkg from TrickyStore target.txt"
+}
+
+cmd_ts_sync_gms() {
+    for p in com.google.android.gms com.google.android.gsf com.android.vending; do
+        cmd_ts_add "$p" "generate" >/dev/null
+    done
+    echo "synced core GMS/Play Store packages into TrickyStore target.txt"
+}
+
+cmd_ts_keybox_import() {
+    tmp="$TS_DIR/keybox.xml.tmp"
+    "$BB" head -c 131072 > "$tmp"
+    if ! grep -q "<AndroidAttestation>" "$tmp" || ! grep -q "<Keybox" "$tmp"; then
+        rm -f "$tmp"
+        echo "invalid keybox.xml: missing <AndroidAttestation> or <Keybox> tags" >&2
+        return 1
+    fi
+    [ -f "$TS_DIR/keybox.xml" ] && cp -f "$TS_DIR/keybox.xml" "$TS_DIR/keybox.xml.bak" 2>/dev/null || true
+    mv "$tmp" "$TS_DIR/keybox.xml"
+    chmod 0600 "$TS_DIR/keybox.xml"
+    echo "imported TrickyStore keybox.xml ($(wc -c < "$TS_DIR/keybox.xml" | tr -d ' ') bytes)"
+}
+
+case "${1:-status}" in
+    status)          cmd_status ;;
+    profiles)        cmd_profiles ;;
+    apply-saved)     cmd_apply_saved ;;
+    set-profile)     shift; cmd_set_profile "$@" ;;
+    set-custom)      shift; cmd_set_custom "$@" ;;
+    ssaid-list)      cmd_ssaid_list ;;
+    ssaid-set)       shift; cmd_ssaid_set "$@" ;;
+    ts-list)         cmd_ts_list ;;
+    ts-add)          shift; cmd_ts_add "$@" ;;
+    ts-remove)       shift; cmd_ts_remove "$@" ;;
+    ts-sync-gms)     cmd_ts_sync_gms ;;
+    ts-keybox-import) cmd_ts_keybox_import ;;
+    *)
+        cat <<'EOF'
+Usage: andarium-spoof <command> [args...]
+  status | profiles | apply-saved
+  set-profile <stock|pixel9pro|s25ultra|rog9|redmagic10|xiaomi15u>
+  set-custom <brand> <manufacturer> <model> <device> <fingerprint>
+  ssaid-list | ssaid-set <pkg> <random|16hex>
+  ts-list | ts-add <pkg> [auto|generate|leaf] | ts-remove <pkg> | ts-sync-gms | ts-keybox-import
+EOF
+        exit 1
+        ;;
+esac

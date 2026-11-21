@@ -3,85 +3,92 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Andarium Root Control v4</title>
+<title>Andarium Root Control v5</title>
 <style>
   :root {
     --bg: #070d0b; --card: #0e1815; --card2: #12211d; --border: #1d352e;
     --accent: #34f5a1; --accent-dim: rgba(52,245,161,0.14);
+    --warn: #f5b942; --warn-dim: rgba(245,185,66,0.14);
     --danger: #ff5c77; --danger-dim: rgba(255,92,119,0.14);
     --text: #e6f4ee; --muted: #84a397;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body {
-    margin: 0; padding: 14px; padding-bottom: 52px;
+    margin: 0; padding: 14px; padding-bottom: 64px;
     background: radial-gradient(circle at 50% 0%, #102920 0%, var(--bg) 52%);
     color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
-    font-size: 14px; line-height: 1.45;
+    font-size: 14px; line-height: 1.45; max-width: 980px; margin-left: auto; margin-right: auto;
   }
   header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 8px; }
   .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
   .logo {
-    width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+    width: 38px; height: 38px; border-radius: 11px; flex-shrink: 0;
     background: linear-gradient(135deg, #0d261d, #07120e); border: 1.5px solid var(--accent);
     display: grid; place-items: center; color: var(--accent); font-weight: 800; font-size: 20px;
   }
   h1 { margin: 0; font-size: 17px; }
   .sub { font-size: 11px; color: var(--muted); }
-  .tabs { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 12px; padding-bottom: 2px; }
+  .tabs { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 12px; padding-bottom: 4px; }
   .tab {
     padding: 7px 12px; border-radius: 999px; border: 1px solid var(--border);
-    background: var(--card); color: var(--muted); font-size: 12.5px; font-weight: 600;
+    background: var(--card); color: var(--muted); font-size: 12px; font-weight: 600;
     cursor: pointer; white-space: nowrap;
   }
   .tab.active { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
   .pane { display: none; }
   .pane.active { display: block; }
   .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
+  @media (min-width: 720px) { .grid { grid-template-columns: repeat(4, 1fr); } }
   .stat { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
-  .stat .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat .k { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
   .stat .v { font-size: 13px; font-weight: 600; margin-top: 2px; word-break: break-word; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; }
-  .card h2 { margin: 0 0 10px; font-size: 12.5px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.7px; }
+  .card h2 { margin: 0 0 10px; font-size: 12px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.7px; }
   .mode-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  @media (min-width: 720px) { .mode-grid { grid-template-columns: repeat(3, 1fr); } }
   .mode-btn {
     text-align: left; padding: 10px; border-radius: 11px; border: 1px solid var(--border);
     background: #0a1310; color: var(--text); cursor: pointer;
   }
   .mode-btn.active { border-color: var(--accent); background: var(--accent-dim); }
-  .mode-btn b { display: block; font-size: 13.5px; }
-  .mode-btn span { font-size: 11px; color: var(--muted); }
+  .mode-btn b { display: block; font-size: 13px; }
+  .mode-btn span { font-size: 11px; color: var(--muted); display: block; margin-top: 2px; }
   .row { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; border-top: 1px solid rgba(255,255,255,0.05); gap: 10px; }
   .row:first-of-type { border-top: none; padding-top: 2px; }
   .row-info { flex: 1; min-width: 0; }
-  .row-title { font-weight: 600; font-size: 14px; }
-  .row-desc { font-size: 11.5px; color: var(--muted); }
+  .row-title { font-weight: 600; font-size: 13.5px; }
+  .row-desc { font-size: 11.5px; color: var(--muted); word-break: break-word; }
   .pill { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; border: 1px solid var(--border); background: var(--card2); color: var(--muted); }
   .pill.on { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+  .pill.warn { border-color: var(--warn); background: var(--warn-dim); color: var(--warn); }
+  .pill.bad { border-color: var(--danger); background: var(--danger-dim); color: var(--danger); }
   .btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
   button {
     border: 1px solid var(--border); background: var(--card2); color: var(--text);
     padding: 7px 10px; border-radius: 9px; font-size: 12px; font-weight: 600; cursor: pointer;
   }
   button.primary { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+  button.warn { border-color: var(--warn); background: var(--warn-dim); color: var(--warn); }
   button.danger { border-color: var(--danger); background: var(--danger-dim); color: var(--danger); }
   button:disabled { opacity: 0.45; }
-  .input-row { display: flex; gap: 6px; margin-top: 7px; }
-  input[type="text"], textarea {
-    flex: 1; min-width: 0; background: #09120f; border: 1px solid var(--border); border-radius: 9px;
-    color: var(--text); padding: 8px 10px; font-size: 13px; outline: none; font-family: inherit;
+  .input-row { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; }
+  input[type="text"], input[type="number"], select, textarea {
+    flex: 1; min-width: 110px; background: #09120f; border: 1px solid var(--border); border-radius: 9px;
+    color: var(--text); padding: 8px 10px; font-size: 12.5px; outline: none; font-family: inherit;
   }
+  textarea { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; min-height: 110px; }
   .list-box { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
   .list-item {
-    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;
     background: #0a1310; border: 1px solid rgba(255,255,255,0.05); border-radius: 9px; padding: 8px 10px;
   }
   pre {
     background: #050a08; border: 1px solid var(--border); border-radius: 10px;
-    padding: 10px; font-size: 11px; color: #a7d4c1; max-height: 240px; overflow: auto;
+    padding: 10px; font-size: 11px; color: #a7d4c1; max-height: 260px; overflow: auto;
     white-space: pre-wrap; word-break: break-word; margin: 8px 0 0;
   }
   #toast {
-    position: fixed; left: 14px; right: 14px; bottom: 14px;
+    position: fixed; left: 14px; right: 14px; bottom: 14px; max-width: 952px; margin: 0 auto;
     background: #0f241c; border: 1px solid var(--accent); color: var(--text);
     padding: 10px 14px; border-radius: 11px; font-size: 12.5px; display: none; z-index: 99;
   }
@@ -91,7 +98,7 @@
 <header>
   <div class="brand">
     <div class="logo">#</div>
-    <div><h1>Andarium Root v4</h1><div class="sub" id="hdr-sub">Connecting...</div></div>
+    <div><h1>Andarium Root v5</h1><div class="sub" id="hdr-sub">Connecting...</div></div>
   </div>
   <div class="btns">
     <button class="primary" onclick="refresh()">Refresh</button>
@@ -101,10 +108,13 @@
 
 <div class="tabs">
   <div class="tab active" onclick="openTab('core',this)">Modes &amp; Root</div>
-  <div class="tab" onclick="openTab('pentest',this)">Pentest &amp; Net</div>
+  <div class="tab" onclick="openTab('wb',this)">RE Workbench</div>
+  <div class="tab" onclick="openTab('net',this)">Net &amp; Firewall</div>
+  <div class="tab" onclick="openTab('spoof',this)">Spoof &amp; Stealth</div>
   <div class="tab" onclick="openTab('apps',this)">SU &amp; DenyList</div>
-  <div class="tab" onclick="openTab('store',this)">Bundled Apps</div>
-  <div class="tab" onclick="openTab('tweaks',this)">Tweaks &amp; Backup</div>
+  <div class="tab" onclick="openTab('store',this)">Apps &amp; Debloat</div>
+  <div class="tab" onclick="openTab('auto',this)">Automation</div>
+  <div class="tab" onclick="openTab('tweaks',this)">Tweaks &amp; Logs</div>
 </div>
 
 <!-- TAB 1: MODES & ROOT -->
@@ -112,7 +122,7 @@
   <div class="grid">
     <div class="stat"><div class="k">Magisk / su</div><div class="v" id="st-magisk">—</div></div>
     <div class="stat"><div class="k">SELinux</div><div class="v" id="st-selinux">—</div></div>
-    <div class="stat"><div class="k">Mode / Preset</div><div class="v" id="st-mode">—</div></div>
+    <div class="stat"><div class="k">Mode / Identity</div><div class="v" id="st-mode">—</div></div>
     <div class="stat"><div class="k">Memory</div><div class="v" id="st-mem">—</div></div>
   </div>
 
@@ -143,7 +153,7 @@
       </div>
     </div>
     <div class="row">
-      <div class="row-info"><div class="row-title">Native ADB Root</div><div class="row-desc">Allows host `adb root` on demand</div></div>
+      <div class="row-info"><div class="row-title">Native ADB Root</div><div class="row-desc">Unlocks host `adb root` on demand</div></div>
       <div class="btns">
         <button id="btn-adb-on" onclick="act('adbroot','on')">ON</button>
         <button id="btn-adb-off" onclick="act('adbroot','off')">OFF</button>
@@ -156,10 +166,6 @@
         <button id="btn-dbg-off" onclick="act('debuggable','off')">0</button>
       </div>
     </div>
-    <div class="row">
-      <div class="row-info"><div class="row-title">Play Integrity Fingerprint</div><div class="row-desc">Refresh PIF via PlayIntegrityFork</div></div>
-      <div class="btns"><button class="primary" onclick="act('pif_update','')">Update PIF</button></div>
-    </div>
   </div>
 
   <div class="card">
@@ -168,13 +174,90 @@
   </div>
 </div>
 
-<!-- TAB 2: PENTEST & NET -->
-<div class="pane" id="pane-pentest">
+<!-- TAB 2: RE WORKBENCH -->
+<div class="pane" id="pane-wb">
   <div class="card">
-    <h2>MITM Proxy, CA Store &amp; Frida</h2>
+    <h2>Standalone On-Device Frida Script Runner (`frida-inject`)</h2>
+    <div class="row">
+      <div class="row-info"><div class="row-title">Injector Status <span class="pill" id="pill-finj">—</span></div><div class="row-desc" id="desc-finj">Zero PC or Python required — runs built-in or custom JS directly on Android</div></div>
+      <div class="btns"><button class="danger" onclick="wbFridaStop()">Stop</button><button onclick="loadFridaLog()">Refresh Log</button></div>
+    </div>
+    <div class="input-row">
+      <select id="wb-frida-pkg"></select>
+      <select id="wb-frida-script"></select>
+      <select id="wb-frida-mode" style="flex:0 0 110px;"><option value="spawn">Spawn (-f)</option><option value="attach">Attach (-p)</option></select>
+      <button class="primary" onclick="wbFridaRun()">Inject</button>
+    </div>
+    <pre id="wb-frida-out">Tap Inject to run a Frida script directly on-device...</pre>
+    <div class="input-row" style="margin-top:10px;">
+      <input type="text" id="wb-js-name" placeholder="my-hook.js">
+      <button onclick="wbFridaLoadEdit()">Load Selected</button>
+      <button class="primary" onclick="wbFridaSave()">Save Custom JS</button>
+    </div>
+    <textarea id="wb-js-code" style="margin-top:6px;" placeholder="Java.perform(() => { console.log('[+] Hook active'); });"></textarea>
+  </div>
+
+  <div class="card">
+    <h2>1-Tap `tcpdump` Packet Capture (PCAP Ring Recorder)</h2>
+    <div class="row">
+      <div class="row-info"><div class="row-title">Capture State <span class="pill" id="pill-pcap">—</span></div><div class="row-desc" id="desc-pcap">Ring-capped at 4 x 25 MB to protect storage</div></div>
+      <div class="btns">
+        <button class="primary" onclick="wbPcapStart()">Start PCAP</button>
+        <button class="danger" onclick="wbPcapStop()">Stop</button>
+      </div>
+    </div>
+    <div class="input-row">
+      <input type="text" id="wb-pcap-bpf" placeholder="Optional BPF filter (e.g. tcp port 443 or host 1.2.3.4)">
+    </div>
+    <div class="list-box" id="wb-pcap-list"></div>
+  </div>
+
+  <div class="card">
+    <h2>In-Browser App SQLite &amp; SharedPreferences Inspector (Read-Only)</h2>
+    <div class="input-row">
+      <select id="wb-insp-pkg"></select>
+      <button class="primary" onclick="wbInspectFiles()">List Files</button>
+    </div>
+    <div class="list-box" id="wb-insp-list"></div>
+    <div class="input-row" id="wb-db-row" style="display:none;">
+      <select id="wb-db-table"></select>
+      <button class="primary" onclick="wbQueryTable()">Preview 50 Rows</button>
+    </div>
+    <pre id="wb-insp-out">Pick an app and tap List Files to browse SharedPreferences XML and SQLite databases.</pre>
+  </div>
+
+  <div class="card">
+    <h2>Live Filtered `logcat` Viewer</h2>
+    <div class="input-row">
+      <select id="wb-lc-pkg"></select>
+      <select id="wb-lc-lvl" style="flex:0 0 90px;"><option value="V">V</option><option value="D">D</option><option value="I" selected>I</option><option value="W">W</option><option value="E">E</option></select>
+      <button class="primary" onclick="wbLogcat()">Fetch Logcat</button>
+    </div>
+    <pre id="wb-lc-out">Tap Fetch Logcat...</pre>
+  </div>
+</div>
+
+<!-- TAB 3: NET & FIREWALL -->
+<div class="pane" id="pane-net">
+  <div class="card">
+    <h2>Transparent UID MITM Proxy (`iptables -t nat`)</h2>
+    <div class="row">
+      <div class="row-info"><div class="row-title">Transparent Redirect <span class="pill" id="pill-tproxy">off</span></div><div class="row-desc" id="desc-tproxy">Forces Flutter, Unity &amp; proxy-unaware apps into Burp/mitmproxy (TCP 80,443)</div></div>
+      <button class="danger" onclick="netAction('net_tproxy_clear','')">Clear</button>
+    </div>
+    <div class="input-row">
+      <input type="text" id="net-tp-target" placeholder="192.168.1.10:8080">
+      <input type="text" id="net-tp-scope" placeholder="all or com.example.app" value="all">
+      <input type="text" id="net-tp-ports" placeholder="80,443" value="80,443" style="flex:0 0 110px;">
+      <button class="primary" onclick="netSetTproxy()">Apply</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Global HTTP Proxy, Private DNS (DoT) &amp; CA Store</h2>
     <div class="row" style="flex-direction:column;align-items:stretch;">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <div class="row-title">HTTP Proxy <span class="pill" id="pill-proxy">off</span></div>
+        <div class="row-title">Global HTTP Proxy <span class="pill" id="pill-proxy">off</span></div>
         <button class="danger" onclick="act('proxy_clear','')">Clear</button>
       </div>
       <div class="input-row">
@@ -182,10 +265,40 @@
         <button class="primary" onclick="setProxy()">Set</button>
       </div>
     </div>
+    <div class="row" style="flex-direction:column;align-items:stretch;">
+      <div class="row-title">Private DNS (DNS-over-TLS) <span class="pill" id="pill-dns">system</span></div>
+      <div class="btns" style="justify-content:flex-start;margin-top:6px;">
+        <button onclick="netAction('net_dns_set','cloudflare')">Cloudflare</button>
+        <button onclick="netAction('net_dns_set','quad9')">Quad9</button>
+        <button onclick="netAction('net_dns_set','adguard')">AdGuard</button>
+        <button onclick="netAction('net_dns_set','mullvad')">Mullvad</button>
+        <button class="danger" onclick="netAction('net_dns_set','off')">System</button>
+      </div>
+    </div>
     <div class="row">
-      <div class="row-info"><div class="row-title">Conscrypt CA Store <span class="pill" id="pill-certs">—</span></div><div class="row-desc">Inject user &amp; custom MITM certs into Android 17</div></div>
+      <div class="row-info"><div class="row-title">Conscrypt System CA Store <span class="pill" id="pill-certs">—</span></div><div class="row-desc">Inject user &amp; custom MITM certs into Android 17 Zygote namespaces</div></div>
       <div class="btns"><button class="primary" onclick="act('certs_sync','')">Sync</button></div>
     </div>
+    <div class="row">
+      <div class="row-info"><div class="row-title">Systemless Ad-Block <span class="pill" id="pill-adblock">—</span></div><div class="row-desc">StevenBlack unified hosts</div></div>
+      <div class="btns">
+        <button onclick="act('adblock','on')">ON</button>
+        <button class="danger" onclick="act('adblock','off')">OFF</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Per-App Root Firewall (`iptables xt_owner`)</h2>
+    <div class="row">
+      <div class="row-info"><div class="row-title">Blocked Apps <span class="pill" id="pill-fw">0</span></div><div class="row-desc">Blocks IPv4 + IPv6 internet access per app UID (persists across reboots)</div></div>
+      <div class="btns"><button onclick="loadNetTab()">Reload</button><button class="danger" onclick="netAction('net_fw_flush','')">Unblock All</button></div>
+    </div>
+    <div class="list-box" id="fw-app-list"></div>
+  </div>
+
+  <div class="card">
+    <h2>Daemons: Frida Server, Dropbear SSH, Shizuku, WireGuard &amp; Tunnel</h2>
     <div class="row">
       <div class="row-info"><div class="row-title">Frida Server <span class="pill" id="pill-frida">—</span></div><div class="row-desc" id="desc-frida">0.0.0.0:27042</div></div>
       <div class="btns">
@@ -195,22 +308,6 @@
       </div>
     </div>
     <div class="row">
-      <div class="row-info"><div class="row-title">Systemless Ad-Block <span class="pill" id="pill-adblock">—</span></div><div class="row-desc">StevenBlack unified hosts</div></div>
-      <div class="btns">
-        <button onclick="act('adblock','on')">ON</button>
-        <button onclick="act('adblock','off')">OFF</button>
-        <button class="primary" onclick="act('adblock','update')">Update</button>
-      </div>
-    </div>
-    <div class="row">
-      <div class="row-info"><div class="row-title">Shizuku Service <span class="pill" id="pill-shizuku">—</span></div><div class="row-desc">Privileged API running as root</div></div>
-      <div class="btns"><button class="primary" onclick="act('shizuku_start','')">Start</button></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Dropbear SSH &amp; Authorized Keys</h2>
-    <div class="row">
       <div class="row-info"><div class="row-title">Dropbear SSH <span class="pill" id="pill-ssh">—</span></div><div class="row-desc" id="desc-ssh">Port 2222</div></div>
       <div class="btns">
         <button onclick="act('ssh','start')">Start</button>
@@ -219,44 +316,168 @@
       </div>
     </div>
     <div class="input-row">
-      <input type="text" id="ssh-key-in" placeholder="ssh-ed25519 AAAA... user@pc">
-      <button class="primary" onclick="addSshKey()">Add Key</button>
+      <input type="text" id="ssh-key-in" placeholder="Paste ssh-ed25519 AAAA... user@host">
+      <button class="primary" onclick="addSshKey()">Add SSH Key</button>
     </div>
     <div class="list-box" id="ssh-key-list"></div>
+    <div class="row">
+      <div class="row-info"><div class="row-title">Shizuku Server <span class="pill" id="pill-shizuku">—</span></div><div class="row-desc">Privileged API daemon</div></div>
+      <div class="btns"><button class="primary" onclick="act('shizuku_start','')">Start</button></div>
+    </div>
+    <div class="row" style="flex-direction:column;align-items:stretch;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div class="row-title">Socat Local TCP Forwarder <span class="pill" id="pill-tun">stopped</span></div>
+        <button class="danger" onclick="netAction('net_tunnel_stop','')">Stop</button>
+      </div>
+      <div class="input-row">
+        <input type="number" id="tun-lport" placeholder="Local port (e.g. 9050)" style="flex:0 0 150px;">
+        <input type="text" id="tun-target" placeholder="Remote IPv4:PORT (e.g. 192.168.1.10:9050)">
+        <button class="primary" onclick="netTunnelStart()">Forward</button>
+      </div>
+    </div>
+    <div class="row" style="flex-direction:column;align-items:stretch;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div class="row-title">Kernel WireGuard (`wg0.conf`) <span class="pill" id="pill-wg">none</span></div>
+        <div class="btns"><button onclick="netAction('net_wg_up','')">Up</button><button class="danger" onclick="netAction('net_wg_down','')">Down</button></div>
+      </div>
+      <textarea id="wg-conf-in" style="margin-top:6px;min-height:76px;" placeholder="[Interface]\nPrivateKey = ...\nAddress = 10.66.66.2/32\n[Peer]\n..."></textarea>
+      <div class="btns" style="margin-top:6px;"><button class="primary" onclick="netWgImport()">Save wg0.conf</button></div>
+    </div>
   </div>
 </div>
 
-<!-- TAB 3: VISUAL PER-APP SU & DENYLIST MANAGER -->
-<div class="pane" id="pane-apps">
+<!-- TAB 4: SPOOF & STEALTH -->
+<div class="pane" id="pane-spoof">
   <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;">
-      <h2 style="margin:0;">Per-App Root &amp; DenyList Manager</h2>
-      <button class="primary" onclick="loadApps()">Scan Apps</button>
+    <h2>1-Tap Device Identity &amp; 120 FPS Gaming Spoofer</h2>
+    <div class="row">
+      <div class="row-info"><div class="row-title">Active Identity <span class="pill on" id="pill-spoof">—</span></div><div class="row-desc" id="desc-spoof">Persisted via early-boot resetprop before Zygote starts</div></div>
+    </div>
+    <div class="mode-grid" id="spoof-grid"></div>
+  </div>
+
+  <div class="card">
+    <h2>Custom Device Properties</h2>
+    <div class="input-row">
+      <input type="text" id="sp-brand" placeholder="Brand (e.g. asus)">
+      <input type="text" id="sp-manuf" placeholder="Manufacturer">
+      <input type="text" id="sp-model" placeholder="Model (required)">
+      <input type="text" id="sp-device" placeholder="Device codename">
     </div>
     <div class="input-row">
-      <input type="text" id="app-search" placeholder="Filter package name..." oninput="renderAppList()">
+      <input type="text" id="sp-fp" placeholder="Build fingerprint (optional)">
+      <button class="primary" onclick="spoofCustom()">Apply Custom</button>
     </div>
-    <div class="list-box" id="apps-list"><div class="sub">Tap "Scan Apps" to load installed apps.</div></div>
+  </div>
+
+  <div class="card">
+    <h2>TrickyStore `target.txt`, `keybox.xml` &amp; Play Integrity</h2>
+    <div class="row">
+      <div class="row-info"><div class="row-title">Keybox &amp; PIF Status <span class="pill" id="pill-kb">—</span></div><div class="row-desc">Manage hardware attestation targets &amp; custom keybox.xml</div></div>
+      <div class="btns">
+        <button class="primary" onclick="spoofAction('spoof_ts_sync','')">Sync GMS</button>
+        <button onclick="act('pif_update','')">Refresh PIF</button>
+      </div>
+    </div>
+    <div class="input-row">
+      <select id="ts-pkg-sel"></select>
+      <select id="ts-mode-sel" style="flex:0 0 130px;"><option value="generate">Cert Gen (!)</option><option value="leaf">Leaf Hack (?)</option><option value="auto">Auto</option></select>
+      <button class="primary" onclick="tsAdd()">Add Target</button>
+    </div>
+    <div class="list-box" id="ts-list"></div>
+    <textarea id="ts-kb-in" style="margin-top:8px;min-height:80px;" placeholder="Paste <AndroidAttestation>...<Keybox>...</AndroidAttestation> XML here to import"></textarea>
+    <div class="btns" style="margin-top:6px;"><button class="primary" onclick="tsImportKeybox()">Import keybox.xml</button></div>
+  </div>
+
+  <div class="card">
+    <h2>Per-App SSAID / Android ID Randomizer</h2>
+    <div class="row">
+      <div class="row-info"><div class="row-title">App Android IDs</div><div class="row-desc">Randomize 16-hex SSAID per app (supports Android 17 ABX binary XML)</div></div>
+      <button onclick="loadSsaid()">Load SSAIDs</button>
+    </div>
+    <div class="list-box" id="ssaid-list"></div>
   </div>
 </div>
 
-<!-- TAB 4: BUNDLED APPS STOREFRONT -->
+<!-- TAB 5: SU & DENYLIST -->
+<div class="pane" id="pane-apps">
+  <div class="card">
+    <h2>Per-App Root (SU) &amp; Magisk DenyList Manager</h2>
+    <div class="input-row"><input type="text" id="app-search" placeholder="Filter package..." oninput="renderApps()"><button onclick="loadApps()">Reload</button></div>
+    <div class="list-box" id="app-list"><div class="row-desc">Tap Reload to scan installed apps...</div></div>
+  </div>
+</div>
+
+<!-- TAB 6: APPS & DEBLOAT -->
 <div class="pane" id="pane-store">
   <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;">
-      <h2 style="margin:0;">Pre-Bundled Offline Apps (/odm)</h2>
-      <button class="primary" onclick="loadBundled()">Refresh</button>
+    <h2>Offline Bundled App Storefront (13 Pre-Staged APKs)</h2>
+    <div class="row"><div class="row-desc">Install or uninstall directly from /odm/andarium-root/apks/ with zero internet.</div><button onclick="loadBundled()">Reload</button></div>
+    <div class="list-box" id="bundled-list"></div>
+  </div>
+  <div class="card">
+    <h2>Safe LineageOS Debloater &amp; App Freezer</h2>
+    <div class="row">
+      <div class="row-info"><div class="row-title">Non-Destructive Package Freezer</div><div class="row-desc">Protected critical system packages cannot be frozen. 100% reversible.</div></div>
+      <div class="btns"><button onclick="loadDebloat()">Scan</button><button class="warn" onclick="autoAction('auto_restore_all','')">Restore All Frozen</button></div>
     </div>
-    <div class="list-box" id="bundled-list"><div class="sub">Loading bundled APK catalog...</div></div>
+    <div class="list-box" id="debloat-list"></div>
   </div>
 </div>
 
-<!-- TAB 5: TWEAKS, DISPLAY, BACKUP & LOGS -->
+<!-- TAB 7: AUTOMATION -->
+<div class="pane" id="pane-auto">
+  <div class="card">
+    <h2>1-Tap Root Quick-Macros</h2>
+    <div class="mode-grid">
+      <button class="mode-btn" onclick="runMacro('clean-caches')"><b>Trim &amp; Drop Caches</b><span>Frees storage + RAM page cache</span></button>
+      <button class="mode-btn" onclick="runMacro('dump-env')"><b>Diagnostic Snapshot</b><span>Kernel, props, memory, ports, modules</span></button>
+      <button class="mode-btn" onclick="runMacro('restart-systemui')"><b>Restart SystemUI</b><span>Refresh UI after DPI/theme edits</span></button>
+      <button class="mode-btn" onclick="runMacro('reset-network')"><b>Reset All Network</b><span>Clears proxy, MITM, firewall &amp; DNS</span></button>
+      <button class="mode-btn" onclick="runMacro('export-apks')"><b>Export User APKs</b><span>Copy all 3rd-party APKs to Downloads</span></button>
+      <button class="mode-btn" onclick="runMacro('config-backup')"><b>Save Backup to SD</b><span>Write JSON snapshot to Downloads</span></button>
+    </div>
+    <pre id="macro-out">Tap any macro to execute as root...</pre>
+  </div>
+
+  <div class="card">
+    <h2>Custom Root Script Editor &amp; Runner (15s timeout)</h2>
+    <div class="input-row">
+      <input type="text" id="auto-sc-name" placeholder="my-task.sh">
+      <button class="primary" onclick="autoSaveScript()">Save Script</button>
+    </div>
+    <textarea id="auto-sc-body" style="margin-top:6px;" placeholder="#!/system/bin/sh\necho &quot;Hello from root: $(id)&quot;"></textarea>
+    <div class="list-box" id="auto-sc-list"></div>
+    <pre id="auto-sc-out">Saved scripts appear above — tap Run to execute.</pre>
+  </div>
+
+  <div class="card">
+    <h2>Background Task Scheduler <span class="pill" id="pill-sched">—</span></h2>
+    <div class="row">
+      <div class="row-info"><div class="row-title">Cron-Lite Root Daemon</div><div class="row-desc">Persisted in /data/adb/andarium/schedules.conf across reboots</div></div>
+      <div class="btns"><button onclick="autoAction('auto_sched_start','')">Start</button><button class="danger" onclick="autoAction('auto_sched_stop','')">Stop</button></div>
+    </div>
+    <div class="input-row">
+      <select id="sched-task">
+        <option value="pif-refresh">Auto-Refresh PlayIntegrityFork</option>
+        <option value="certs-sync">Auto-Sync Conscrypt CA Certs</option>
+        <option value="clean-caches">Auto-Trim App Caches</option>
+        <option value="config-backup">Auto-Backup Config JSON</option>
+      </select>
+      <select id="sched-hours" style="flex:0 0 110px;"><option value="6">Every 6h</option><option value="12">Every 12h</option><option value="24" selected>Every 24h</option><option value="72">Every 72h</option></select>
+      <button class="primary" onclick="schedSave(1)">Enable</button>
+      <button class="danger" onclick="schedSave(0)">Disable</button>
+    </div>
+    <div class="list-box" id="sched-list"></div>
+  </div>
+</div>
+
+<!-- TAB 8: TWEAKS & LOGS -->
 <div class="pane" id="pane-tweaks">
   <div class="card">
-    <h2>Performance &amp; Gaming Tweaks</h2>
+    <h2>Performance, Gamer &amp; Display Tweaks</h2>
     <div class="row">
-      <div class="row-info"><div class="row-title">Animation Scale <span class="pill" id="pill-anim">—</span></div><div class="row-desc">0x = instant UI transitions</div></div>
+      <div class="row-info"><div class="row-title">Window / Transition Animations <span class="pill" id="pill-anim">—</span></div><div class="row-desc">0x = instant UI response</div></div>
       <div class="btns">
         <button onclick="act('tweaks_anim','0')">0x</button>
         <button onclick="act('tweaks_anim','0.5')">0.5x</button>
@@ -264,7 +485,7 @@
       </div>
     </div>
     <div class="row">
-      <div class="row-info"><div class="row-title">zRAM Swappiness <span class="pill" id="pill-swap">—</span></div><div class="row-desc">130 maximizes compressed RAM for games</div></div>
+      <div class="row-info"><div class="row-title">zRAM Swappiness <span class="pill" id="pill-swap">—</span></div><div class="row-desc">Higher uses zRAM more aggressively</div></div>
       <div class="btns">
         <button onclick="act('tweaks_swap','60')">60</button>
         <button onclick="act('tweaks_swap','100')">100</button>
@@ -272,282 +493,432 @@
       </div>
     </div>
     <div class="row">
-      <div class="row-info"><div class="row-title">Stay Awake <span class="pill" id="pill-awake">—</span></div><div class="row-desc">Prevent guest screen timeout</div></div>
+      <div class="row-info"><div class="row-title">Stay Awake <span class="pill" id="pill-awake">—</span></div><div class="row-desc">Prevent sleep during gaming or Frida sessions</div></div>
       <div class="btns">
         <button onclick="act('tweaks_awake','on')">ON</button>
         <button onclick="act('tweaks_awake','off')">OFF</button>
       </div>
     </div>
-  </div>
-
-  <div class="card">
-    <h2>Display DPI &amp; Resolution</h2>
-    <div class="row-desc" id="desc-display">—</div>
-    <div class="btns" style="justify-content:flex-start;margin-top:8px;">
-      <button onclick="act('display_density','320')">320 DPI</button>
-      <button onclick="act('display_density','360')">360 DPI</button>
-      <button onclick="act('display_density','420')">420 DPI</button>
-      <button class="danger" onclick="resetDisplay()">Reset</button>
-    </div>
-    <div class="input-row">
-      <input type="text" id="disp-size-in" placeholder="WxH e.g. 1080x2340">
-      <button class="primary" onclick="setDisplaySize()">Set Size</button>
+    <div class="row" style="flex-direction:column;align-items:stretch;">
+      <div class="row-title">Display DPI <span class="pill" id="pill-dpi">—</span></div>
+      <div class="btns" style="justify-content:flex-start;margin-top:6px;">
+        <button onclick="act('display_density','320')">320</button>
+        <button onclick="act('display_density','360')">360</button>
+        <button onclick="act('display_density','420')">420</button>
+        <button onclick="act('display_density','480')">480</button>
+        <button class="danger" onclick="act('display_density','reset')">Reset</button>
+      </div>
     </div>
   </div>
-
   <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;">
-      <h2 style="margin:0;">Config Backup Export</h2>
-      <button class="primary" onclick="exportBackup()">Export JSON</button>
+    <h2>Configuration Backup &amp; Boot Log</h2>
+    <div class="btns" style="justify-content:flex-start;">
+      <button class="primary" onclick="downloadBackup()">Download JSON Backup</button>
+      <button onclick="loadLogs()">Load Boot Log</button>
     </div>
-    <pre id="backup-box">Tap "Export JSON" to snapshot settings, SSH keys &amp; DenyList.</pre>
-  </div>
-
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;">
-      <h2 style="margin:0;">Boot &amp; Provisioning Log</h2>
-      <button onclick="loadLogs()">Reload</button>
-    </div>
-    <pre id="log-box">Loading logs...</pre>
+    <pre id="log-box">Tap "Load Boot Log" to inspect /data/adb/andarium-root.log</pre>
   </div>
 </div>
 
 <div id="toast"></div>
 
 <script>
-const params = new URLSearchParams(location.search);
-const TOKEN = params.get("token") || "";
-const HAS_KSU = typeof window.ksu !== "undefined" && typeof window.ksu.exec === "function";
-let state = {};
-let installedApps = [];
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+let LAST = {}, APPS = [], INSPECT_CUR = { pkg: '', db: '' };
 
-function toast(msg) {
-  const el = document.getElementById("toast");
-  el.textContent = msg; el.style.display = "block";
-  clearTimeout(window._t);
-  window._t = setTimeout(() => { el.style.display = "none"; }, 3800);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(msg, err) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.borderColor = err ? '#ff5c77' : '#34f5a1';
+  el.style.display = 'block';
+  clearTimeout(window._tt);
+  window._tt = setTimeout(() => el.style.display = 'none', 3600);
 }
 
-function openTab(name, el) {
-  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-  document.querySelectorAll(".pane").forEach(p => p.classList.remove("active"));
-  el.classList.add("active");
-  document.getElementById("pane-" + name).classList.add("active");
-  if (name === "apps" && installedApps.length === 0) loadApps();
-  if (name === "store") loadBundled();
-  if (name === "tweaks") loadLogs();
+async function api(action, params = {}, body = null) {
+  const qs = new URLSearchParams({ token: TOKEN, action });
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) qs.set(k, String(v));
+  const opts = body !== null ? { method: 'POST', body } : {};
+  const r = await fetch('/cgi-bin/api?' + qs.toString(), opts);
+  return r.json();
 }
 
-function ksuExec(cmd) {
-  return new Promise((resolve, reject) => {
-    const cb = "_cb_" + Math.random().toString(36).slice(2);
-    window[cb] = (errno, stdout, stderr) => {
-      delete window[cb];
-      if (errno === 0) resolve(stdout); else reject(new Error(stderr || stdout || ("exit " + errno)));
-    };
-    window.ksu.exec(cmd, "{}", cb);
+function openTab(id, el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('pane-' + id).classList.add('active');
+  if (id === 'apps' && !APPS.length) loadApps();
+  if (id === 'store') { loadBundled(); loadDebloat(); }
+  if (id === 'wb') loadWorkbench();
+  if (id === 'net') loadNetTab();
+  if (id === 'spoof') loadSpoofTab();
+  if (id === 'auto') loadAutoTab();
+}
+
+function populatePkgSelects() {
+  const opts = APPS.map(a => `<option value="${esc(a.package)}">${esc(a.package)}</option>`).join('');
+  ['wb-frida-pkg', 'wb-insp-pkg', 'ts-pkg-sel'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = opts || '<option value="">(no 3rd-party apps)</option>';
   });
+  const lc = document.getElementById('wb-lc-pkg');
+  if (lc) lc.innerHTML = '<option value="">All processes</option>' + opts;
 }
-function shQuote(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'"; }
 
-async function apiCall(action, value = "") {
-  if (HAS_KSU && !TOKEN) {
-    const map = {
-      status: "andarium-ctl status-json", apps_list: "andarium-ctl apps-json",
-      bundled_list: "andarium-ctl bundled-json", backup_export: "andarium-ctl backup-export",
-      logs: "andarium-ctl logs 120", certs_sync: "andarium-ctl certs sync",
-      shizuku_start: "andarium-ctl shizuku start", pif_update: "andarium-ctl pif-update",
-      proxy_clear: "andarium-ctl proxy clear", reboot: "andarium-ctl reboot",
-    };
-    let cmd = map[action];
-    if (!cmd) {
-      if (action === "proxy_set") cmd = "andarium-ctl proxy set " + shQuote(value);
-      else if (action === "tweaks_anim") cmd = "andarium-ctl tweaks anim " + shQuote(value);
-      else if (action === "tweaks_swap") cmd = "andarium-ctl tweaks swappiness " + shQuote(value);
-      else if (action === "tweaks_awake") cmd = "andarium-ctl tweaks awake " + shQuote(value);
-      else if (action === "display_density") cmd = "andarium-ctl display density " + shQuote(value);
-      else if (action === "display_size") cmd = "andarium-ctl display size " + shQuote(value);
-      else if (action === "module_enable") cmd = "andarium-ctl module enable " + shQuote(value);
-      else if (action === "module_disable") cmd = "andarium-ctl module disable " + shQuote(value);
-      else if (action === "denylist_add") cmd = "andarium-ctl denylist add " + shQuote(value);
-      else if (action === "denylist_rm") cmd = "andarium-ctl denylist rm " + shQuote(value);
-      else if (action === "bundled_install") cmd = "andarium-ctl bundled-install " + shQuote(value);
-      else if (action === "bundled_uninstall") cmd = "andarium-ctl bundled-uninstall " + shQuote(value);
-      else if (action === "ssh_addkey") cmd = "andarium-ctl ssh addkey " + shQuote(value);
-      else if (action === "ssh_delkey") cmd = "andarium-ctl ssh delkey " + shQuote(value);
-      else if (action === "frida" && value === "autostart_on") cmd = "andarium-ctl frida autostart on";
-      else if (action === "frida" && value === "autostart_off") cmd = "andarium-ctl frida autostart off";
-      else if (action === "ssh" && value === "autostart_on") cmd = "andarium-ctl ssh autostart on";
-      else if (action === "ssh" && value === "autostart_off") cmd = "andarium-ctl ssh autostart off";
-      else cmd = "andarium-ctl " + action + " " + shQuote(value);
-    }
-    const out = await ksuExec(cmd);
-    if (["status","apps_list","bundled_list","backup_export"].includes(action)) return JSON.parse(out);
-    if (action === "logs") return { ok: true, logs: out };
-    return { ok: true, output: out.trim() };
+async function ensureApps() {
+  if (!APPS.length) {
+    try { const d = await api('apps_list'); if (Array.isArray(d)) APPS = d; } catch (_) {}
   }
-  const url = "/cgi-bin/api?token=" + encodeURIComponent(TOKEN) + "&action=" + encodeURIComponent(action) + "&value=" + encodeURIComponent(value);
-  const res = await fetch(url, { cache: "no-store" });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
-  return data;
-}
-
-function setPill(id, text, isOn) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.textContent = text; el.className = "pill " + (isOn ? "on" : "");
+  populatePkgSelects();
 }
 
 async function refresh() {
   try {
-    state = await apiCall("status");
-    document.getElementById("hdr-sub").textContent = "Android " + state.android + " (API " + state.sdk + ") · Linux " + state.kernel;
-    document.getElementById("st-magisk").textContent = state.magisk + " (" + state.root_su + ")";
-    document.getElementById("st-selinux").textContent = state.selinux;
-    document.getElementById("st-mode").textContent = (state.active_mode || "dev") + " / " + (state.preboot_preset || "default");
-    document.getElementById("st-mem").textContent = state.mem_avail_mb + " / " + state.mem_total_mb + " MB";
+    const d = await api('status');
+    if (d.error) { toast(d.error, true); return; }
+    LAST = d;
+    document.getElementById('hdr-sub').textContent = `Android ${d.android} · Linux ${d.kernel} · Preset: ${d.preboot_preset || 'mix'}`;
+    document.getElementById('st-magisk').textContent = `${d.magisk} (${d.root_su})`;
+    document.getElementById('st-selinux').textContent = d.selinux;
+    document.getElementById('st-mode').textContent = `${d.active_mode} · ${d.spoof_profile || 'stock'}`;
+    document.getElementById('st-mem').textContent = `${d.mem_avail_mb} / ${d.mem_total_mb} MB`;
 
-    ["dev","pentest","gamer","stealth"].forEach(m => {
-      document.getElementById("mbtn-" + m).className = "mode-btn" + (state.active_mode === m ? " active" : "");
-    });
-    setPill("pill-root", state.root_su, state.root_su === "active");
-    document.getElementById("btn-se-perm").className = /permissive|0/i.test(state.selinux) ? "primary" : "";
-    document.getElementById("btn-se-enf").className = /enforcing|1/i.test(state.selinux) ? "primary" : "";
-    document.getElementById("btn-adb-on").className = state.adbroot === "1" ? "primary" : "";
-    document.getElementById("btn-adb-off").className = state.adbroot !== "1" ? "primary" : "";
-    document.getElementById("btn-dbg-on").className = state.debuggable === "1" ? "primary" : "";
-    document.getElementById("btn-dbg-off").className = state.debuggable !== "1" ? "primary" : "";
+    ['dev','pentest','gamer','stealth'].forEach(m => document.getElementById('mbtn-' + m).classList.toggle('active', d.active_mode === m));
+    const pr = document.getElementById('pill-root'); pr.textContent = d.root_su; pr.className = 'pill ' + (d.root_su === 'active' ? 'on' : 'bad');
+    document.getElementById('btn-se-perm').classList.toggle('primary', (d.selinux||'').toLowerCase().includes('perm'));
+    document.getElementById('btn-se-enf').classList.toggle('primary', (d.selinux||'').toLowerCase().includes('enf'));
+    document.getElementById('btn-adb-on').classList.toggle('primary', d.adbroot === '1');
+    document.getElementById('btn-adb-off').classList.toggle('primary', d.adbroot !== '1');
+    document.getElementById('btn-dbg-on').classList.toggle('primary', d.debuggable === '1');
+    document.getElementById('btn-dbg-off').classList.toggle('primary', d.debuggable !== '1');
 
-    setPill("pill-proxy", state.proxy || "off", Boolean(state.proxy));
-    setPill("pill-frida", state.frida, state.frida === "running");
-    document.getElementById("desc-frida").textContent = state.frida_bind + " · auto=" + (state.frida_autostart === "1" ? "ON" : "OFF");
-    document.getElementById("btn-frida-auto").className = state.frida_autostart === "1" ? "primary" : "";
-    setPill("pill-ssh", state.ssh, state.ssh === "running");
-    document.getElementById("desc-ssh").textContent = "Port " + state.ssh_port + " · keys=" + state.ssh_keys + " · auto=" + (state.ssh_autostart === "1" ? "ON" : "OFF");
-    document.getElementById("btn-ssh-auto").className = state.ssh_autostart === "1" ? "primary" : "";
-    setPill("pill-adblock", state.adblock, state.adblock === "on");
-    setPill("pill-certs", state.certs + " (+" + state.certs_extra + ")", state.certs === "mounted");
-    setPill("pill-shizuku", state.shizuku, state.shizuku === "running");
-    setPill("pill-anim", (state.anim_scale || "1") + "x", state.anim_scale === "0" || state.anim_scale === "0.5");
-    setPill("pill-swap", String(state.swappiness || 60), Number(state.swappiness) >= 100);
-    setPill("pill-awake", state.stay_awake === "1" ? "ON" : "OFF", state.stay_awake === "1");
-    document.getElementById("desc-display").textContent = "Size: " + (state.display_size || "?") + " · Density: " + (state.display_density || "?");
+    document.getElementById('pill-proxy').textContent = d.proxy || 'off';
+    document.getElementById('pill-proxy').className = 'pill ' + (d.proxy ? 'on' : '');
+    if (d.proxy) document.getElementById('proxy-val').value = d.proxy;
+    document.getElementById('pill-certs').textContent = `${d.certs} (+${d.certs_extra})`;
+    document.getElementById('pill-certs').className = 'pill ' + (d.certs === 'mounted' ? 'on' : '');
+    document.getElementById('pill-frida').textContent = d.frida;
+    document.getElementById('pill-frida').className = 'pill ' + (d.frida === 'running' ? 'on' : '');
+    document.getElementById('desc-frida').textContent = `${d.frida_bind} · autostart: ${d.frida_autostart === '1' ? 'ON' : 'OFF'}`;
+    document.getElementById('btn-frida-auto').classList.toggle('primary', d.frida_autostart === '1');
+    document.getElementById('pill-adblock').textContent = d.adblock;
+    document.getElementById('pill-adblock').className = 'pill ' + (d.adblock === 'on' ? 'on' : '');
+    document.getElementById('pill-ssh').textContent = d.ssh;
+    document.getElementById('pill-ssh').className = 'pill ' + (d.ssh === 'running' ? 'on' : '');
+    document.getElementById('desc-ssh').textContent = `Port ${d.ssh_port} · ${d.ssh_keys} key(s) · autostart: ${d.ssh_autostart === '1' ? 'ON' : 'OFF'}`;
+    document.getElementById('btn-ssh-auto').classList.toggle('primary', d.ssh_autostart === '1');
+    document.getElementById('pill-shizuku').textContent = d.shizuku;
+    document.getElementById('pill-shizuku').className = 'pill ' + (d.shizuku === 'running' ? 'on' : '');
+    document.getElementById('pill-anim').textContent = d.anim_scale + 'x';
+    document.getElementById('pill-swap').textContent = d.swappiness;
+    document.getElementById('pill-awake').textContent = d.stay_awake === '1' ? 'ON' : 'OFF';
+    document.getElementById('pill-dpi').textContent = d.display_density;
 
-    const klist = document.getElementById("ssh-key-list"); klist.innerHTML = "";
-    (state.ssh_key_list || []).forEach(k => {
-      const div = document.createElement("div"); div.className = "list-item";
-      const info = document.createElement("div");
-      const top = document.createElement("b"); top.textContent = "#" + k.index + " " + k.type + (k.comment ? " (" + k.comment + ")" : "");
-      const sub = document.createElement("div"); sub.className = "sub"; sub.textContent = k.preview;
-      info.appendChild(top); info.appendChild(sub);
-      const delBtn = document.createElement("button"); delBtn.className = "danger"; delBtn.textContent = "Remove";
-      delBtn.onclick = () => act("ssh_delkey", String(k.index));
-      div.appendChild(info); div.appendChild(delBtn); klist.appendChild(div);
-    });
+    document.getElementById('ssh-key-list').innerHTML = (d.ssh_key_list || []).map(k =>
+      `<div class="list-item"><div class="row-desc"><b>#${k.index}</b> ${esc(k.type)} ${esc(k.preview)} ${esc(k.comment)}</div><button class="danger" onclick="act('ssh_delkey','${k.index}')">Remove</button></div>`
+    ).join('');
 
-    const list = document.getElementById("mod-list"); list.innerHTML = "";
-    (state.modules || []).forEach(m => {
-      const div = document.createElement("div"); div.className = "list-item";
-      const left = document.createElement("div");
-      const title = document.createElement("b"); title.textContent = m.name;
-      const sub = document.createElement("div"); sub.className = "sub"; sub.textContent = m.id + (m.version ? " · " + m.version : "");
-      left.appendChild(title); left.appendChild(sub);
-      const btn = document.createElement("button");
-      btn.className = m.enabled ? "primary" : "danger";
-      btn.textContent = m.enabled ? "Active" : "Disabled";
-      if (m.id === "andarium_control") btn.disabled = true;
-      else btn.onclick = () => act(m.enabled ? "module_disable" : "module_enable", m.id);
-      div.appendChild(left); div.appendChild(btn); list.appendChild(div);
-    });
-  } catch (e) {
-    document.getElementById("hdr-sub").textContent = "Error: " + e.message;
-    toast("Status error: " + e.message);
-  }
-}
-
-async function loadApps() {
-  try {
-    toast("Scanning installed packages...");
-    const data = await apiCall("apps_list");
-    installedApps = data.apps || [];
-    renderAppList();
-  } catch (e) { toast("App scan error: " + e.message); }
-}
-
-function renderAppList() {
-  const q = (document.getElementById("app-search").value || "").toLowerCase();
-  const box = document.getElementById("apps-list"); box.innerHTML = "";
-  installedApps.filter(a => !q || a.pkg.toLowerCase().includes(q)).forEach(a => {
-    const div = document.createElement("div"); div.className = "list-item";
-    const left = document.createElement("div");
-    const t = document.createElement("b"); t.textContent = a.pkg;
-    const s = document.createElement("div"); s.className = "sub"; s.textContent = "uid=" + a.uid;
-    left.appendChild(t); left.appendChild(s);
-    const btns = document.createElement("div"); btns.className = "btns";
-    const suBtn = document.createElement("button");
-    suBtn.className = a.su ? "primary" : "";
-    suBtn.textContent = a.su ? "SU: ON" : "Grant SU";
-    suBtn.onclick = async () => { await act(a.su ? "revoke" : "grant", a.pkg); await loadApps(); };
-    const dlBtn = document.createElement("button");
-    dlBtn.className = a.denylist ? "danger" : "";
-    dlBtn.textContent = a.denylist ? "DenyList: ON" : "+ DenyList";
-    dlBtn.onclick = async () => { await act(a.denylist ? "denylist_rm" : "denylist_add", a.pkg); await loadApps(); };
-    btns.appendChild(suBtn); btns.appendChild(dlBtn);
-    div.appendChild(left); div.appendChild(btns); box.appendChild(div);
-  });
-}
-
-async function loadBundled() {
-  try {
-    const data = await apiCall("bundled_list");
-    const box = document.getElementById("bundled-list"); box.innerHTML = "";
-    (data.bundled || []).forEach(b => {
-      const div = document.createElement("div"); div.className = "list-item";
-      const left = document.createElement("div");
-      const t = document.createElement("b"); t.textContent = b.label;
-      const s = document.createElement("div"); s.className = "sub"; s.textContent = b.pkg;
-      left.appendChild(t); left.appendChild(s);
-      const btn = document.createElement("button");
-      btn.className = b.installed ? "danger" : "primary";
-      btn.textContent = b.installed ? "Uninstall" : "Install";
-      btn.onclick = async () => {
-        await act(b.installed ? "bundled_uninstall" : "bundled_install", b.installed ? b.pkg : b.file);
-        await loadBundled();
-      };
-      div.appendChild(left); div.appendChild(btn); box.appendChild(div);
-    });
-  } catch (e) { toast("Bundled list error: " + e.message); }
+    document.getElementById('mod-list').innerHTML = (d.modules || []).map(m =>
+      `<div class="list-item"><div><div class="row-title">${esc(m.name)} <span class="pill ${m.enabled?'on':''}">${m.enabled?'ON':'OFF'}</span></div><div class="row-desc">${esc(m.id)} · ${esc(m.version)}</div></div>` +
+      (m.id === 'andarium_control' ? '<span class="pill">Locked</span>' : `<button class="${m.enabled?'danger':'primary'}" onclick="act('${m.enabled?'module_disable':'module_enable'}','${esc(m.id)}')">${m.enabled?'Disable':'Enable'}</button>`) + '</div>'
+    ).join('');
+  } catch (e) { toast('Connection error: ' + e, true); }
 }
 
 async function act(action, value) {
-  try {
-    toast("Running " + action + "...");
-    const r = await apiCall(action, value);
-    toast(r.output || "Done");
-    await refresh();
-  } catch (e) { toast("Error: " + e.message); }
+  const d = await api(action, { value });
+  toast(d.ok ? (d.output || 'Done') : (d.error || 'Failed'), !d.ok);
+  refresh();
 }
-function setProxy() { const v = document.getElementById("proxy-val").value.trim(); if (!v.includes(":")) { toast("Enter host:port"); return; } act("proxy_set", v); }
-function addSshKey() { const k = document.getElementById("ssh-key-in").value.trim(); if (!k) return; act("ssh_addkey", k).then(() => { document.getElementById("ssh-key-in").value = ""; }); }
-function setDisplaySize() { const v = document.getElementById("disp-size-in").value.trim(); if (!/^\d{3,4}x\d{3,4}$/.test(v)) { toast("Enter WxH"); return; } act("display_size", v); }
-async function resetDisplay() { await act("display_size", "reset"); await act("display_density", "reset"); }
-function toggleFridaAuto() { act("frida", state.frida_autostart === "1" ? "autostart_off" : "autostart_on"); }
-function toggleSshAuto() { act("ssh", state.ssh_autostart === "1" ? "autostart_off" : "autostart_on"); }
-function confirmReboot() { if (confirm("Reboot the Android guest now?")) act("reboot", ""); }
-async function exportBackup() {
-  try {
-    const data = await apiCall("backup_export");
-    const txt = JSON.stringify(data, null, 2);
-    document.getElementById("backup-box").textContent = txt;
-    if (navigator.clipboard) navigator.clipboard.writeText(txt).catch(() => {});
-    toast("Backup exported (copied if permitted)");
-  } catch (e) { toast("Backup error: " + e.message); }
+function setProxy() { const v = document.getElementById('proxy-val').value.trim(); if (!v) return toast('Enter host:port', true); act('proxy_set', v); }
+function toggleFridaAuto() { act('frida', LAST.frida_autostart === '1' ? 'autostart_off' : 'autostart_on'); }
+function toggleSshAuto() { act('ssh', LAST.ssh_autostart === '1' ? 'autostart_off' : 'autostart_on'); }
+function addSshKey() { const v = document.getElementById('ssh-key-in').value.trim(); if (!v) return toast('Paste public key', true); document.getElementById('ssh-key-in').value = ''; act('ssh_addkey', v); }
+
+// ── TAB 2: RE WORKBENCH ──
+async function loadWorkbench() {
+  await ensureApps();
+  const [st, sc, pst, plist] = await Promise.all([
+    api('wb_frida_status'), api('wb_frida_scripts'), api('wb_pcap_status'), api('wb_pcap_list')
+  ]);
+  const pf = document.getElementById('pill-finj');
+  pf.textContent = st.running ? `running (pid ${st.pid})` : (st.available ? 'ready' : 'unavailable');
+  pf.className = 'pill ' + (st.running ? 'on' : '');
+  if (st.running) document.getElementById('desc-finj').textContent = `Target: ${st.target} · Script: ${st.script}`;
+  if (Array.isArray(sc)) {
+    document.getElementById('wb-frida-script').innerHTML = sc.map(s =>
+      `<option value="${esc(s.name)}">${esc(s.name)} (${s.source})</option>`
+    ).join('');
+  }
+  const pp = document.getElementById('pill-pcap');
+  pp.textContent = pst.running ? `recording (${pst.file})` : 'idle';
+  pp.className = 'pill ' + (pst.running ? 'warn' : '');
+  if (Array.isArray(plist)) {
+    document.getElementById('wb-pcap-list').innerHTML = plist.length ? plist.map(f =>
+      `<div class="list-item"><div class="row-desc"><b>${esc(f.name)}</b> (${(f.size/1024).toFixed(1)} KB)</div><div class="btns">` +
+      `<a href="/cgi-bin/api?token=${encodeURIComponent(TOKEN)}&action=wb_pcap_download&value=${encodeURIComponent(f.name)}" download><button class="primary">Download</button></a>` +
+      `<button class="danger" onclick="wbPcapDel('${esc(f.name)}')">Delete</button></div></div>`
+    ).join('') : '<div class="row-desc">No PCAP files recorded yet.</div>';
+  }
 }
-async function loadLogs() {
-  try { const r = await apiCall("logs"); document.getElementById("log-box").textContent = r.logs || "(empty)"; }
-  catch (e) { document.getElementById("log-box").textContent = "Error: " + e.message; }
+async function wbFridaRun() {
+  const pkg = document.getElementById('wb-frida-pkg').value;
+  const sname = document.getElementById('wb-frida-script').value;
+  const mode = document.getElementById('wb-frida-mode').value;
+  const d = await api('wb_frida_run', { value: mode, p2: pkg, p3: sname });
+  toast(d.ok ? d.output : d.error, !d.ok);
+  loadWorkbench(); loadFridaLog();
 }
+async function wbFridaStop() { const d = await api('wb_frida_stop'); toast(d.output || d.error, !d.ok); loadWorkbench(); }
+async function loadFridaLog() { const d = await api('wb_frida_log', { value: 150 }); document.getElementById('wb-frida-out').textContent = d.output || d.error || ''; }
+async function wbFridaLoadEdit() {
+  const s = document.getElementById('wb-frida-script').value;
+  const d = await api('wb_frida_read', { value: s });
+  if (d.ok) { document.getElementById('wb-js-name').value = s; document.getElementById('wb-js-code').value = d.output; }
+  else toast(d.error, true);
+}
+async function wbFridaSave() {
+  const name = document.getElementById('wb-js-name').value.trim();
+  const code = document.getElementById('wb-js-code').value;
+  if (!name) return toast('Enter script filename (e.g. hook.js)', true);
+  const d = await api('wb_frida_save', { value: name }, code);
+  toast(d.ok ? d.output : d.error, !d.ok);
+  loadWorkbench();
+}
+async function wbPcapStart() {
+  const bpf = document.getElementById('wb-pcap-bpf').value.trim();
+  const d = await api('wb_pcap_start', { value: bpf });
+  toast(d.ok ? d.output : d.error, !d.ok); loadWorkbench();
+}
+async function wbPcapStop() { const d = await api('wb_pcap_stop'); toast(d.output || d.error, !d.ok); loadWorkbench(); }
+async function wbPcapDel(name) { const d = await api('wb_pcap_delete', { value: name }); toast(d.output || d.error, !d.ok); loadWorkbench(); }
+async function wbLogcat() {
+  const pkg = document.getElementById('wb-lc-pkg').value;
+  const lvl = document.getElementById('wb-lc-lvl').value;
+  const d = await api('wb_logcat', { value: pkg, p2: lvl, p3: 120 });
+  document.getElementById('wb-lc-out').textContent = d.output || d.error || '(empty)';
+}
+async function wbInspectFiles() {
+  const pkg = document.getElementById('wb-insp-pkg').value;
+  INSPECT_CUR.pkg = pkg;
+  document.getElementById('wb-db-row').style.display = 'none';
+  const d = await api('wb_inspect_files', { value: pkg });
+  const prefs = (d.prefs || []).map(f => `<div class="list-item"><div class="row-desc"><b>XML</b> ${esc(f.name)} (${f.size} B)</div><button class="primary" onclick="wbReadXml('${esc(f.name)}')">View</button></div>`);
+  const dbs = (d.dbs || []).map(f => `<div class="list-item"><div class="row-desc"><b>DB</b> ${esc(f.name)} (${f.size} B)</div><button class="primary" onclick="wbOpenDb('${esc(f.name)}')">Tables</button></div>`);
+  document.getElementById('wb-insp-list').innerHTML = [...prefs, ...dbs].join('') || '<div class="row-desc">No shared_prefs or databases found.</div>';
+}
+async function wbReadXml(fname) {
+  const d = await api('wb_inspect_xml', { value: INSPECT_CUR.pkg, p2: fname });
+  document.getElementById('wb-insp-out').textContent = d.output || d.error || '';
+}
+async function wbOpenDb(fname) {
+  INSPECT_CUR.db = fname;
+  const tbls = await api('wb_inspect_db_tables', { value: INSPECT_CUR.pkg, p2: fname });
+  if (Array.isArray(tbls) && tbls.length) {
+    document.getElementById('wb-db-table').innerHTML = tbls.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+    document.getElementById('wb-db-row').style.display = 'flex';
+    wbQueryTable();
+  } else {
+    document.getElementById('wb-insp-out').textContent = 'No tables found (or database is encrypted/empty).';
+  }
+}
+async function wbQueryTable() {
+  const tbl = document.getElementById('wb-db-table').value;
+  const d = await api('wb_inspect_db_query', { value: INSPECT_CUR.pkg, p2: INSPECT_CUR.db, p3: tbl, p4: 50 });
+  document.getElementById('wb-insp-out').textContent = d.output || d.error || '(empty)';
+}
+
+// ── TAB 3: NET & FIREWALL ──
+async function loadNetTab() {
+  await ensureApps();
+  const [st, blocked] = await Promise.all([api('net_status'), api('net_fw_list')]);
+  const bset = new Set(Array.isArray(blocked) ? blocked : []);
+  const ptp = document.getElementById('pill-tproxy');
+  ptp.textContent = st.tproxy_target ? `${st.tproxy_target} (${st.tproxy_scope})` : 'off';
+  ptp.className = 'pill ' + (st.tproxy_target ? 'on' : '');
+  if (st.tproxy_target) {
+    document.getElementById('net-tp-target').value = st.tproxy_target;
+    document.getElementById('net-tp-scope').value = st.tproxy_scope || 'all';
+    document.getElementById('net-tp-ports').value = st.tproxy_ports || '80,443';
+  }
+  const pdns = document.getElementById('pill-dns');
+  pdns.textContent = st.dns_specifier || st.dns_mode || 'system';
+  pdns.className = 'pill ' + (st.dns_specifier ? 'on' : '');
+  const pfw = document.getElementById('pill-fw');
+  pfw.textContent = `${bset.size} blocked`;
+  pfw.className = 'pill ' + (bset.size ? 'warn' : '');
+  const ptun = document.getElementById('pill-tun');
+  ptun.textContent = st.tunnel_running ? st.tunnel_spec : 'stopped';
+  ptun.className = 'pill ' + (st.tunnel_running ? 'on' : '');
+  const pwg = document.getElementById('pill-wg');
+  pwg.textContent = st.wg_up ? 'UP (wg0)' : (st.wg_configured ? 'staged' : 'none');
+  pwg.className = 'pill ' + (st.wg_up ? 'on' : (st.wg_configured ? 'warn' : ''));
+
+  document.getElementById('fw-app-list').innerHTML = APPS.map(a => {
+    const blk = bset.has(a.package);
+    return `<div class="list-item"><div class="row-desc"><b>${esc(a.package)}</b> (uid ${a.uid})</div>` +
+      `<button class="${blk?'danger':'primary'}" onclick="netAction('${blk?'net_fw_unblock':'net_fw_block'}','${esc(a.package)}')">${blk?'Blocked — Unblock':'Allow — Block'}</button></div>`;
+  }).join('') || '<div class="row-desc">No user apps loaded.</div>';
+}
+async function netAction(action, value, extra = {}) {
+  const d = await api(action, { value, ...extra });
+  toast(d.ok ? d.output : d.error, !d.ok);
+  loadNetTab();
+}
+function netSetTproxy() {
+  netAction('net_tproxy_set', document.getElementById('net-tp-target').value.trim(), {
+    p2: document.getElementById('net-tp-scope').value.trim() || 'all',
+    p3: document.getElementById('net-tp-ports').value.trim() || '80,443'
+  });
+}
+function netTunnelStart() {
+  netAction('net_tunnel_start', document.getElementById('tun-lport').value.trim(), { p2: document.getElementById('tun-target').value.trim() });
+}
+async function netWgImport() {
+  const body = document.getElementById('wg-conf-in').value;
+  const d = await api('net_wg_import', {}, body);
+  toast(d.ok ? d.output : d.error, !d.ok); loadNetTab();
+}
+
+// ── TAB 4: SPOOF & STEALTH ──
+async function loadSpoofTab() {
+  await ensureApps();
+  const [st, cat, ts] = await Promise.all([api('spoof_status'), api('spoof_profiles'), api('spoof_ts_list')]);
+  document.getElementById('pill-spoof').textContent = `${st.profile} · ${st.model}`;
+  document.getElementById('desc-spoof').textContent = `Brand: ${st.brand} · Device: ${st.device} · FP: ${st.fingerprint}`;
+  const pkb = document.getElementById('pill-kb');
+  pkb.textContent = st.keybox_present ? `keybox (${st.keybox_size} B) · ${st.trickystore_targets} targets` : `no keybox · ${st.trickystore_targets} targets`;
+  pkb.className = 'pill ' + (st.keybox_present ? 'on' : 'warn');
+
+  const profs = (cat && cat.profiles) || {};
+  document.getElementById('spoof-grid').innerHTML = Object.entries(profs).map(([id, p]) =>
+    `<button class="mode-btn ${st.profile===id?'active':''}" onclick="spoofAction('spoof_set','${esc(id)}')"><b>${esc(p.name)}</b><span>${esc(p.tagline)}</span></button>`
+  ).join('');
+
+  document.getElementById('ts-list').innerHTML = (Array.isArray(ts) && ts.length) ? ts.map(t =>
+    `<div class="list-item"><div class="row-desc"><b>${esc(t.package)}</b> <span class="pill">${esc(t.mode)}</span></div><button class="danger" onclick="spoofAction('spoof_ts_remove','${esc(t.package)}')">Remove</button></div>`
+  ).join('') : '<div class="row-desc">No TrickyStore targets configured yet.</div>';
+}
+async function spoofAction(action, value, extra = {}) {
+  const d = await api(action, { value, ...extra });
+  toast(d.ok ? d.output : d.error, !d.ok);
+  loadSpoofTab(); refresh();
+}
+function spoofCustom() {
+  spoofAction('spoof_custom', document.getElementById('sp-brand').value.trim(), {
+    p2: document.getElementById('sp-manuf').value.trim(),
+    p3: document.getElementById('sp-model').value.trim(),
+    p4: document.getElementById('sp-device').value.trim(),
+    p5: document.getElementById('sp-fp').value.trim()
+  });
+}
+function tsAdd() { spoofAction('spoof_ts_add', document.getElementById('ts-pkg-sel').value, { p2: document.getElementById('ts-mode-sel').value }); }
+async function tsImportKeybox() {
+  const xml = document.getElementById('ts-kb-in').value;
+  const d = await api('spoof_ts_keybox', {}, xml);
+  toast(d.ok ? d.output : d.error, !d.ok); loadSpoofTab();
+}
+async function loadSsaid() {
+  const arr = await api('spoof_ssaid_list');
+  document.getElementById('ssaid-list').innerHTML = (Array.isArray(arr) && arr.length) ? arr.slice(0, 80).map(x =>
+    `<div class="list-item"><div class="row-desc"><b>${esc(x.package)}</b><br><code>${esc(x.ssaid)}</code></div>` +
+    `<button class="warn" onclick="spoofAction('spoof_ssaid_set','${esc(x.package)}',{p2:'random'})">Randomize</button></div>`
+  ).join('') : '<div class="row-desc">No SSAID entries found.</div>';
+}
+
+// ── TAB 5: SU & DENYLIST ──
+async function loadApps() {
+  document.getElementById('app-list').innerHTML = '<div class="row-desc">Scanning...</div>';
+  const d = await api('apps_list');
+  if (Array.isArray(d)) { APPS = d; populatePkgSelects(); renderApps(); }
+}
+function renderApps() {
+  const q = (document.getElementById('app-search').value || '').toLowerCase();
+  const list = APPS.filter(a => a.package.toLowerCase().includes(q));
+  document.getElementById('app-list').innerHTML = list.map(a =>
+    `<div class="list-item"><div class="row-info"><div class="row-title">${esc(a.package)}</div><div class="row-desc">UID ${a.uid}</div></div>` +
+    `<div class="btns"><button class="${a.root?'primary':''}" onclick="toggleApp('${a.root?'revoke':'grant'}','${esc(a.package)}')">${a.root?'SU: ON':'SU: OFF'}</button>` +
+    `<button class="${a.denylist?'danger':''}" onclick="toggleApp('${a.denylist?'denylist_rm':'denylist_add'}','${esc(a.package)}')">${a.denylist?'Hidden':'DenyList'}</button></div></div>`
+  ).join('') || '<div class="row-desc">No matching apps.</div>';
+}
+async function toggleApp(action, pkg) { const d = await api(action, { value: pkg }); toast(d.output || d.error, !d.ok); loadApps(); }
+
+// ── TAB 6: APPS & DEBLOAT ──
+async function loadBundled() {
+  const list = await api('bundled_list');
+  document.getElementById('bundled-list').innerHTML = (Array.isArray(list) ? list : []).map(b =>
+    `<div class="list-item"><div class="row-info"><div class="row-title">${esc(b.name)} <span class="pill ${b.installed?'on':''}">${b.installed?'Installed':'Available'}</span></div><div class="row-desc">${esc(b.package)} · ${b.size_mb} MB</div></div>` +
+    `<div class="btns">${b.installed ? `<button class="danger" onclick="storeAct('bundled_uninstall','${esc(b.package)}')">Uninstall</button>` : `<button class="primary" onclick="storeAct('bundled_install','${esc(b.file)}')">Install</button>`}</div></div>`
+  ).join('');
+}
+async function storeAct(action, val) { toast('Working...'); const d = await api(action, { value: val }); toast(d.ok ? d.output : d.error, !d.ok); loadBundled(); }
+async function loadDebloat() {
+  const list = await api('auto_debloat_list');
+  document.getElementById('debloat-list').innerHTML = (Array.isArray(list) ? list : []).filter(x => x.installed).map(x =>
+    `<div class="list-item"><div><div class="row-title">${esc(x.label)} <span class="pill ${x.frozen?'warn':'on'}">${x.frozen?'Frozen':'Active'}</span></div><div class="row-desc">${esc(x.package)}</div></div>` +
+    `<button class="${x.frozen?'primary':'danger'}" onclick="autoAction('${x.frozen?'auto_unfreeze':'auto_freeze'}','${esc(x.package)}')">${x.frozen?'Unfreeze':'Freeze'}</button></div>`
+  ).join('') || '<div class="row-desc">No matching LineageOS system apps found.</div>';
+}
+
+// ── TAB 7: AUTOMATION ──
+async function loadAutoTab() {
+  const [sc, sch] = await Promise.all([api('auto_scripts_list'), api('auto_sched_list')]);
+  document.getElementById('auto-sc-list').innerHTML = (Array.isArray(sc) && sc.length) ? sc.map(s =>
+    `<div class="list-item"><div class="row-desc"><b>${esc(s.name)}</b> (${s.size} B)</div><div class="btns">` +
+    `<button onclick="autoLoadScript('${esc(s.name)}')">Edit</button><button class="primary" onclick="autoRunScript('${esc(s.name)}')">Run</button><button class="danger" onclick="autoDelScript('${esc(s.name)}')">Del</button></div></div>`
+  ).join('') : '<div class="row-desc">No custom scripts saved yet.</div>';
+  const ps = document.getElementById('pill-sched');
+  ps.textContent = sch.running ? 'running' : 'stopped';
+  ps.className = 'pill ' + (sch.running ? 'on' : '');
+  document.getElementById('sched-list').innerHTML = (sch.tasks || []).map(t =>
+    `<div class="list-item"><div class="row-desc"><b>${esc(t.task)}</b> · every ${t.hours}h</div><span class="pill ${t.enabled?'on':''}">${t.enabled?'Enabled':'Off'}</span></div>`
+  ).join('') || '<div class="row-desc">No scheduled tasks configured.</div>';
+}
+async function autoAction(action, value, extra = {}) {
+  const d = await api(action, { value, ...extra });
+  toast(d.ok ? d.output : d.error, !d.ok);
+  loadDebloat(); loadAutoTab();
+}
+async function runMacro(m) {
+  document.getElementById('macro-out').textContent = 'Running ' + m + '...';
+  const d = await api('auto_macro', { value: m });
+  document.getElementById('macro-out').textContent = d.output || d.error || 'Done';
+  toast(d.ok ? 'Macro completed' : d.error, !d.ok);
+}
+async function autoSaveScript() {
+  const name = document.getElementById('auto-sc-name').value.trim();
+  const body = document.getElementById('auto-sc-body').value;
+  if (!name) return toast('Enter script name (e.g. cleanup.sh)', true);
+  const d = await api('auto_script_save', { value: name }, body);
+  toast(d.ok ? d.output : d.error, !d.ok); loadAutoTab();
+}
+async function autoLoadScript(name) {
+  const d = await api('auto_script_read', { value: name });
+  if (d.ok) { document.getElementById('auto-sc-name').value = name; document.getElementById('auto-sc-body').value = d.output; }
+}
+async function autoRunScript(name) {
+  document.getElementById('auto-sc-out').textContent = 'Running ' + name + '...';
+  const d = await api('auto_script_run', { value: name });
+  document.getElementById('auto-sc-out').textContent = d.output || d.error || '(no output)';
+}
+async function autoDelScript(name) { const d = await api('auto_script_delete', { value: name }); toast(d.output || d.error, !d.ok); loadAutoTab(); }
+async function schedSave(en) {
+  await autoAction('auto_sched_set', document.getElementById('sched-task').value, {
+    p2: document.getElementById('sched-hours').value, p3: en
+  });
+}
+
+// ── TAB 8: TWEAKS & LOGS ──
+async function loadLogs() { const d = await api('logs'); document.getElementById('log-box').textContent = d.logs || '(empty)'; }
+async function downloadBackup() {
+  const d = await api('backup_export');
+  const blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'andarium-root-backup.json'; a.click();
+  toast('Exported andarium-root-backup.json');
+}
+function confirmReboot() { if (confirm('Reboot the Android guest now?')) act('reboot', ''); }
 
 refresh();
 </script>

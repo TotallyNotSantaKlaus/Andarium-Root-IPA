@@ -1,0 +1,390 @@
+#!/system/bin/sh
+# SPDX-License-Identifier: GPL-2.0-or-later
+# andarium-auto — Safe LineageOS Debloater, App Freezer, Root Quick-Macros,
+# Custom Script Runner & Background Task Scheduler for Andarium Root v5.
+
+STATE_DIR="/data/adb/andarium"
+RUN_DIR="$STATE_DIR/run"
+SCRIPTS_DIR="$STATE_DIR/scripts"
+FROZEN_LIST="$STATE_DIR/frozen-packages.list"
+SCHED_CONF="$STATE_DIR/schedules.conf"
+SCHED_LOG="$STATE_DIR/scheduler.log"
+ODM_ROOT="/odm/andarium-root"
+PROFILES_JSON="$ODM_ROOT/config/device-profiles.json"
+
+BB="/data/adb/magisk/busybox"
+[ -x "$BB" ] || BB="$ODM_ROOT/magisk-bin/busybox"
+JQ="$ODM_ROOT/tools/cli/jq"
+[ -x "$JQ" ] || JQ="$(command -v jq 2>/dev/null || echo /odm/andarium-root/tools/cli/jq)"
+CTL="$ODM_ROOT/scripts/andarium-ctl"
+NET="$ODM_ROOT/scripts/andarium-net"
+
+if [ "$(id -u)" != "0" ]; then
+    echo "andarium-auto: must be run as root" >&2
+    exit 1
+fi
+
+mkdir -p "$STATE_DIR" "$RUN_DIR" "$SCRIPTS_DIR" 2>/dev/null
+chmod 0700 "$STATE_DIR" "$RUN_DIR" "$SCRIPTS_DIR" 2>/dev/null
+
+json_escape() {
+    printf '%s' "$1" | "$BB" sed 's/\\/\\\\/g; s/"/\\"/g' | "$BB" tr '\r\n' '  '
+}
+
+valid_pkg() {
+    case "$1" in
+        ''|*[!A-Za-z0-9_.]*|*..*) return 1 ;;
+        *.*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+valid_script_name() {
+    case "$1" in
+        ''|.*|*[!A-Za-z0-9_.-]*|*/*|*..*) return 1 ;;
+        *.sh) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+is_protected_pkg() {
+    case "$1" in
+        android|com.android.systemui|com.android.settings|com.android.shell|\
+        com.android.providers.settings|com.android.providers.downloads|\
+        com.android.providers.media|com.android.providers.media.module|\
+        com.android.keychain|com.android.inputmethod.latin|\
+        com.android.packageinstaller|com.android.permissioncontroller|\
+        com.android.webview|com.google.android.webview|com.topjohnwu.magisk)
+            return 0
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+is_pid_running() {
+    pidfile="$1"
+    [ -f "$pidfile" ] || return 1
+    pid="$(cat "$pidfile" 2>/dev/null | tr -d '\r\n ')"
+    case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+    kill -0 "$pid" 2>/dev/null
+}
+
+# ── SAFE DEBLOATER & APP FREEZER ───────────────────────────────────────────
+
+cmd_debloat_list() {
+    disabled_pkgs="$(pm list packages -d 2>/dev/null | "$BB" sed 's/^package://')"
+    installed_pkgs="$(pm list packages 2>/dev/null | "$BB" sed 's/^package://')"
+
+    printf '['
+    first=1
+    if [ -f "$PROFILES_JSON" ] && [ -x "$JQ" ]; then
+        "$JQ" -r '.debloat_catalog[] | "\(.package)|\(.label)|\(.category)"' "$PROFILES_JSON" 2>/dev/null | while IFS='|' read -r pkg label catg; do
+            [ -n "$pkg" ] || continue
+            inst="false"
+            printf '%s\n' "$installed_pkgs" | grep -Fxq "$pkg" && inst="true"
+            frozen="false"
+            printf '%s\n' "$disabled_pkgs" | grep -Fxq "$pkg" && frozen="true"
+            [ "$first" = "1" ] || printf ','
+            first=0
+            printf '{"package":"%s","label":"%s","category":"%s","installed":%s,"frozen":%s}' \
+                "$(json_escape "$pkg")" "$(json_escape "$label")" "$(json_escape "$catg")" "$inst" "$frozen"
+        done
+    fi
+    printf ']\n'
+}
+
+cmd_freeze() {
+    pkg="$1"
+    valid_pkg "$pkg" || { echo "invalid package" >&2; return 1; }
+    if is_protected_pkg "$pkg"; then
+        echo "refused: $pkg is a protected critical system package" >&2
+        return 1
+    fi
+    pm disable-user --user 0 "$pkg" 2>&1 || return 1
+    touch "$FROZEN_LIST"
+    grep -Fxv "$pkg" "$FROZEN_LIST" > "$FROZEN_LIST.tmp" 2>/dev/null || true
+    printf '%s\n' "$pkg" >> "$FROZEN_LIST.tmp"
+    mv "$FROZEN_LIST.tmp" "$FROZEN_LIST"
+    chmod 0600 "$FROZEN_LIST"
+    echo "frozen: $pkg"
+}
+
+cmd_unfreeze() {
+    pkg="$1"
+    valid_pkg "$pkg" || { echo "invalid package" >&2; return 1; }
+    pm enable "$pkg" 2>&1 || return 1
+    if [ -f "$FROZEN_LIST" ]; then
+        grep -Fxv "$pkg" "$FROZEN_LIST" > "$FROZEN_LIST.tmp" 2>/dev/null || true
+        mv "$FROZEN_LIST.tmp" "$FROZEN_LIST"
+    fi
+    echo "unfrozen: $pkg"
+}
+
+cmd_restore_all() {
+    count=0
+    if [ -f "$FROZEN_LIST" ]; then
+        while IFS= read -r pkg; do
+            pkg="$(printf '%s' "$pkg" | tr -d '\r\n ')"
+            [ -n "$pkg" ] || continue
+            pm enable "$pkg" >/dev/null 2>&1 && count=$((count + 1))
+        done < "$FROZEN_LIST"
+        rm -f "$FROZEN_LIST"
+    fi
+    echo "restored $count previously frozen package(s)"
+}
+
+# ── BUILT-IN ROOT QUICK-MACROS ─────────────────────────────────────────────
+
+cmd_macro() {
+    m="$1"
+    case "$m" in
+        clean-caches)
+            pm trim-caches 4G 2>/dev/null || true
+            sync
+            echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
+            echo "trimmed app caches and dropped page cache"
+            ;;
+        dump-env)
+            echo "=== Andarium Root v5 Diagnostic Snapshot ==="
+            echo "Date: $(date 2>/dev/null)"
+            echo "Kernel: $(uname -a 2>/dev/null)"
+            echo "SELinux: $(getenforce 2>/dev/null)"
+            echo "Model: $(getprop ro.product.brand)/$(getprop ro.product.model) ($(getprop ro.product.device))"
+            echo "Fingerprint: $(getprop ro.build.fingerprint)"
+            echo "Magisk: $(magisk -v 2>/dev/null || echo hidden)"
+            echo "--- Memory ---"
+            free -m 2>/dev/null || head -n 5 /proc/meminfo
+            echo "--- Listening Ports ---"
+            "$BB" netstat -tlnp 2>/dev/null || ss -tlnp 2>/dev/null || true
+            echo "--- Modules ---"
+            ls -1 /data/adb/modules 2>/dev/null || true
+            ;;
+        restart-systemui)
+            killall com.android.systemui 2>/dev/null || "$BB" pkill -f com.android.systemui 2>/dev/null || true
+            echo "restarted SystemUI"
+            ;;
+        reset-network)
+            [ -x "$CTL" ] && "$CTL" proxy clear >/dev/null 2>&1 || true
+            [ -x "$NET" ] && "$NET" fw-flush >/dev/null 2>&1 || true
+            [ -x "$NET" ] && "$NET" tproxy-clear >/dev/null 2>&1 || true
+            [ -x "$NET" ] && "$NET" dns-set off >/dev/null 2>&1 || true
+            echo "reset HTTP proxy, transparent MITM rules, firewall blocks, and Private DNS"
+            ;;
+        export-apks)
+            outdir="/sdcard/Download/Andarium-Exports"
+            mkdir -p "$outdir" 2>/dev/null || { echo "cannot create $outdir" >&2; return 1; }
+            count=0
+            pm list packages -3 -f 2>/dev/null | while IFS= read -r line; do
+                raw="${line#package:}"
+                apk="${raw%=*}"
+                pkg="${raw##*=}"
+                [ -f "$apk" ] && valid_pkg "$pkg" || continue
+                cp -f "$apk" "$outdir/${pkg}.apk" 2>/dev/null && count=$((count + 1))
+            done
+            echo "exported user APKs to $outdir"
+            ;;
+        config-backup)
+            outdir="/sdcard/Download/Andarium-Backups"
+            mkdir -p "$outdir" 2>/dev/null || true
+            ts="$(date +%Y%m%d-%H%M%S 2>/dev/null || echo now)"
+            if [ -x "$CTL" ]; then
+                "$CTL" backup-export > "$outdir/andarium-backup-${ts}.json" 2>/dev/null
+                echo "saved backup -> $outdir/andarium-backup-${ts}.json"
+            else
+                echo "andarium-ctl missing" >&2; return 1
+            fi
+            ;;
+        *)
+            echo "unknown macro: $m" >&2
+            return 1
+            ;;
+    esac
+}
+
+# ── CUSTOM USER SCRIPT RUNNER ──────────────────────────────────────────────
+
+cmd_scripts_list() {
+    printf '['
+    first=1
+    for f in "$SCRIPTS_DIR"/*.sh; do
+        [ -f "$f" ] || continue
+        bn="$(basename "$f")"
+        sz="$(wc -c < "$f" 2>/dev/null | tr -d ' ')"
+        [ "$first" = "1" ] || printf ','
+        first=0
+        printf '{"name":"%s","size":%s}' "$(json_escape "$bn")" "${sz:-0}"
+    done
+    printf ']\n'
+}
+
+cmd_script_save() {
+    name="$1"
+    case "$name" in *.sh) ;; *) name="${name}.sh" ;; esac
+    valid_script_name "$name" || { echo "invalid script name" >&2; return 1; }
+    out="$SCRIPTS_DIR/$name"
+    "$BB" head -c 32768 | "$BB" tr -d '\r' > "$out"
+    chmod 0700 "$out"
+    echo "saved script: $name"
+}
+
+cmd_script_read() {
+    name="$1"
+    valid_script_name "$name" || { echo "invalid script name" >&2; return 1; }
+    [ -f "$SCRIPTS_DIR/$name" ] || { echo "script not found" >&2; return 1; }
+    "$BB" head -c 32768 "$SCRIPTS_DIR/$name"
+}
+
+cmd_script_delete() {
+    name="$1"
+    valid_script_name "$name" || { echo "invalid script name" >&2; return 1; }
+    rm -f "$SCRIPTS_DIR/$name"
+    echo "deleted script: $name"
+}
+
+cmd_script_run() {
+    name="$1"
+    valid_script_name "$name" || { echo "invalid script name" >&2; return 1; }
+    target="$SCRIPTS_DIR/$name"
+    [ -f "$target" ] || { echo "script not found: $name" >&2; return 1; }
+    chmod 0700 "$target"
+    if "$BB" timeout --help >/dev/null 2>&1; then
+        "$BB" timeout 15 sh "$target" 2>&1
+    else
+        sh "$target" 2>&1
+    fi
+}
+
+# ── BACKGROUND TASK SCHEDULER (CRON-LITE) ──────────────────────────────────
+
+run_sched_task() {
+    task="$1"
+    ts="$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo now)"
+    printf '[%s] running scheduled task: %s\n' "$ts" "$task" >> "$SCHED_LOG"
+    case "$task" in
+        pif-refresh)   [ -x "$CTL" ] && "$CTL" pif-update >> "$SCHED_LOG" 2>&1 || true ;;
+        certs-sync)    [ -x "$CTL" ] && "$CTL" certs sync >> "$SCHED_LOG" 2>&1 || true ;;
+        clean-caches)  cmd_macro clean-caches >> "$SCHED_LOG" 2>&1 || true ;;
+        config-backup) cmd_macro config-backup >> "$SCHED_LOG" 2>&1 || true ;;
+        script:*)
+            sname="${task#script:}"
+            cmd_script_run "$sname" >> "$SCHED_LOG" 2>&1 || true
+            ;;
+    esac
+}
+
+cmd_sched_list() {
+    running="false"
+    is_pid_running "$RUN_DIR/sched.pid" && running="true"
+    printf '{"running":%s,"tasks":[' "$running"
+    first=1
+    if [ -f "$SCHED_CONF" ]; then
+        while IFS='|' read -r task hours enabled; do
+            case "$task" in ''|'#'*) continue ;; esac
+            [ "$first" = "1" ] || printf ','
+            first=0
+            printf '{"task":"%s","hours":%s,"enabled":%s}' \
+                "$(json_escape "$task")" "${hours:-24}" "${enabled:-0}"
+        done < "$SCHED_CONF"
+    fi
+    printf ']}\n'
+}
+
+cmd_sched_set() {
+    task="$1"
+    hours="$2"
+    enabled="$3"
+    case "$task" in
+        pif-refresh|certs-sync|clean-caches|config-backup) ;;
+        script:*)
+            valid_script_name "${task#script:}" || { echo "invalid script task" >&2; return 1; }
+            ;;
+        *) echo "unsupported task: $task" >&2; return 1 ;;
+    esac
+    case "$hours" in ''|*[!0-9]*) echo "hours must be integer" >&2; return 1 ;; esac
+    [ "$hours" -ge 1 ] && [ "$hours" -le 168 ] || { echo "hours must be 1..168" >&2; return 1; }
+    case "$enabled" in 0|1) ;; *) echo "enabled must be 0 or 1" >&2; return 1 ;; esac
+
+    touch "$SCHED_CONF"
+    "$BB" awk -F'|' -v t="$task" '$1 != t' "$SCHED_CONF" > "$SCHED_CONF.tmp" 2>/dev/null || true
+    printf '%s|%s|%s\n' "$task" "$hours" "$enabled" >> "$SCHED_CONF.tmp"
+    mv "$SCHED_CONF.tmp" "$SCHED_CONF"
+    chmod 0600 "$SCHED_CONF"
+    if grep -q '|1$' "$SCHED_CONF" 2>/dev/null; then
+        cmd_sched_start >/dev/null 2>&1 || true
+    else
+        cmd_sched_stop >/dev/null 2>&1 || true
+    fi
+    echo "scheduled $task every ${hours}h (enabled=$enabled)"
+}
+
+cmd_sched_loop() {
+    # Runs once every 30 minutes and fires any enabled task whose elapsed interval >= hours*3600
+    while true; do
+        now="$(date +%s 2>/dev/null || echo 0)"
+        if [ -f "$SCHED_CONF" ]; then
+            while IFS='|' read -r task hours enabled; do
+                case "$task" in ''|'#'*) continue ;; esac
+                [ "$enabled" = "1" ] || continue
+                safe_id="$(printf '%s' "$task" | tr ':./' '___')"
+                stamp_file="$RUN_DIR/sched_last_${safe_id}"
+                last=0
+                [ -f "$stamp_file" ] && last="$(cat "$stamp_file" 2>/dev/null | tr -d '\r\n ')"
+                case "$last" in ''|*[!0-9]*) last=0 ;; esac
+                interval=$((hours * 3600))
+                if [ $((now - last)) -ge "$interval" ]; then
+                    printf '%s\n' "$now" > "$stamp_file"
+                    run_sched_task "$task"
+                fi
+            done < "$SCHED_CONF"
+        fi
+        sleep 1800
+    done
+}
+
+cmd_sched_start() {
+    if is_pid_running "$RUN_DIR/sched.pid"; then
+        echo "scheduler already running"
+        return 0
+    fi
+    [ -f "$SCHED_CONF" ] && grep -q '|1$' "$SCHED_CONF" 2>/dev/null || { echo "no enabled schedules"; return 0; }
+    nohup "$0" sched-loop >/dev/null 2>&1 &
+    echo $! > "$RUN_DIR/sched.pid"
+    echo "scheduler started (pid $(cat "$RUN_DIR/sched.pid"))"
+}
+
+cmd_sched_stop() {
+    if [ -f "$RUN_DIR/sched.pid" ]; then
+        pid="$(cat "$RUN_DIR/sched.pid" 2>/dev/null | tr -d '\r\n ')"
+        case "$pid" in ''|*[!0-9]*) ;; *) kill "$pid" 2>/dev/null || true ;; esac
+        rm -f "$RUN_DIR/sched.pid"
+    fi
+    echo "scheduler stopped"
+}
+
+case "${1:-help}" in
+    debloat-list)  cmd_debloat_list ;;
+    freeze)        shift; cmd_freeze "$@" ;;
+    unfreeze)      shift; cmd_unfreeze "$@" ;;
+    restore-all)   cmd_restore_all ;;
+    macro)         shift; cmd_macro "$@" ;;
+    scripts-list)  cmd_scripts_list ;;
+    script-save)   shift; cmd_script_save "$@" ;;
+    script-read)   shift; cmd_script_read "$@" ;;
+    script-delete) shift; cmd_script_delete "$@" ;;
+    script-run)    shift; cmd_script_run "$@" ;;
+    sched-list)    cmd_sched_list ;;
+    sched-set)     shift; cmd_sched_set "$@" ;;
+    sched-start)   cmd_sched_start ;;
+    sched-stop)    cmd_sched_stop ;;
+    sched-loop)    cmd_sched_loop ;;
+    *)
+        cat <<'EOF'
+Usage: andarium-auto <command> [args...]
+  debloat-list | freeze <pkg> | unfreeze <pkg> | restore-all
+  macro <clean-caches|dump-env|restart-systemui|reset-network|export-apks|config-backup>
+  scripts-list | script-save <name.sh> | script-read <name.sh> | script-delete <name.sh> | script-run <name.sh>
+  sched-list | sched-set <task> <hours> <0|1> | sched-start | sched-stop
+EOF
+        exit 1
+        ;;
+esac

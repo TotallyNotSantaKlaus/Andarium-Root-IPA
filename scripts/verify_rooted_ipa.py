@@ -208,7 +208,7 @@ def verify_cmdline(built_cmdline: bytes, stock_cmdline: bytes | None, *, expect_
             ar_cfg = w.split("=", 1)[1]
     if boot_dev_count != 1:
         fail(f"Expected androidboot.boot_devices exactly once, found {boot_dev_count}")
-    if ar_cfg is None or not ar_cfg.startswith("4,") or len(ar_cfg) >= 91:
+    if ar_cfg is None or not (ar_cfg.startswith("4,") or ar_cfg.startswith("5,")) or len(ar_cfg) >= 91:
         fail(f"Invalid or missing androidboot.ar.cfg token: {ar_cfg!r}")
     if stock_cmdline is not None:
         stock_words = [w for w in stock_cmdline.decode("utf-8").split() if not w.startswith("androidboot.ar.")]
@@ -560,7 +560,18 @@ def verify_odm(
             if (stat.S_IMODE(sp.stat().st_mode) & 0o111) == 0:
                 fail(f"andarium_control/{sh_rel} is not executable")
             check_shell_script(sp.read_bytes(), f"andarium_control/{sh_rel}")
-        ok("andarium_control v4 module verified (WebUI + token CGI + systemless hosts, sh -n passed)")
+        ok("andarium_control v5 module verified (WebUI + token CGI + systemless hosts, sh -n passed)")
+
+        dev_prof_path = payload_root / "config" / "device-profiles.json"
+        if not dev_prof_path.is_file():
+            fail("Missing /odm/andarium-root/config/device-profiles.json")
+        dev_prof = json.loads(dev_prof_path.read_text(encoding="utf-8"))
+        for req_p in ("stock", "pixel9pro", "s25ultra", "rog9", "redmagic10", "xiaomi15u"):
+            if req_p not in dev_prof.get("profiles", {}):
+                fail(f"device-profiles.json missing profile: {req_p}")
+        if not dev_prof.get("debloat_catalog") or not dev_prof.get("protected_packages"):
+            fail("device-profiles.json missing debloat_catalog or protected_packages")
+        ok(f"device-profiles.json verified ({len(dev_prof['profiles'])} spoof profiles + {len(dev_prof['debloat_catalog'])} safe debloat items)")
 
         # Core modules (ReZygisk + Vector)
         if expect_modules:
@@ -608,12 +619,16 @@ def verify_odm(
                     fail(f"Missing Zygisk-Assistant file: {rel}")
             ok("Stealth stack verified (PlayIntegrityFork v19 + TrickyStore v1.4.1 + Zygisk-Assistant v2.1.4)")
 
-        # Pentest tools (Frida Server + script pack + static/NDK ARM64 CLI suite)
+        # Pentest tools (Frida Server + Frida Inject + script pack + static/NDK ARM64 CLI suite)
         if expect_pentest:
             frida_bin = payload_root / "tools" / "frida-server"
             if not frida_bin.is_file() or (stat.S_IMODE(frida_bin.stat().st_mode) & 0o111) == 0:
                 fail("frida-server missing or not executable")
             check_elf_arch(frida_bin.read_bytes(), android_image.ELFCLASS64, android_image.EM_AARCH64, "tools/frida-server")
+            finj_bin = payload_root / "tools" / "frida-inject"
+            if not finj_bin.is_file() or (stat.S_IMODE(finj_bin.stat().st_mode) & 0o111) == 0:
+                fail("frida-inject missing or not executable")
+            check_elf_arch(finj_bin.read_bytes(), android_image.ELFCLASS64, android_image.EM_AARCH64, "tools/frida-inject")
             for js_name in EXPECTED_FRIDA_SCRIPTS:
                 jp = payload_root / "tools" / "frida-scripts" / js_name
                 if not jp.is_file():
@@ -628,8 +643,8 @@ def verify_odm(
                     fail(f"CLI pentest tool missing or not executable: {cname}")
                 check_elf_arch(cp.read_bytes(), android_image.ELFCLASS64, android_image.EM_AARCH64, f"tools/cli/{cname}")
             ok(
-                f"Pentest lab verified (Frida Server {frida_bin.stat().st_size:,} B + "
-                f"{len(EXPECTED_FRIDA_SCRIPTS)} Frida bypass scripts + 5 ARM64 CLI tools)"
+                f"Pentest lab verified (frida-server {frida_bin.stat().st_size:,} B + frida-inject {finj_bin.stat().st_size:,} B + "
+                f"{len(EXPECTED_FRIDA_SCRIPTS)} Frida scripts + 5 ARM64 CLI tools)"
             )
 
         # Networking tools (Dropbear SSH + StevenBlack hosts)
@@ -649,7 +664,17 @@ def verify_odm(
 
         # Guest scripts on /odm
         scripts_dir = payload_root / "scripts"
-        for sname in ("andarium_boot_complete.sh", "andarium-ctl", "andarium-termux-setup", "andarium-shell-rc.sh"):
+        odm_scripts = (
+            "andarium_boot_complete.sh",
+            "andarium-ctl",
+            "andarium-workbench",
+            "andarium-spoof",
+            "andarium-net",
+            "andarium-auto",
+            "andarium-termux-setup",
+            "andarium-shell-rc.sh",
+        )
+        for sname in odm_scripts:
             sp = scripts_dir / sname
             if not sp.is_file() or (stat.S_IMODE(sp.stat().st_mode) & 0o111) == 0:
                 fail(f"Script {sname} missing or not executable")
@@ -658,7 +683,7 @@ def verify_odm(
             if sname == "andarium_boot_complete.sh":
                 if f'DEFAULT_SELINUX="{expected_selinux}"'.encode() not in data:
                     fail(f"andarium_boot_complete.sh missing DEFAULT_SELINUX={expected_selinux!r}")
-        ok("all 4 /odm guest scripts LF-only, executable, and pass sh -n")
+        ok(f"all {len(odm_scripts)} /odm guest scripts LF-only, executable, and pass sh -n")
 
     # Bundled APKs (pinned SHA-256 + testzip)
     artifacts = json.loads((MANIFESTS_DIR / "artifacts.json").read_text(encoding="utf-8"))

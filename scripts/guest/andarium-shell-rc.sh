@@ -15,6 +15,11 @@ alias ssh-off='andarium-ctl ssh stop'
 alias proxy-off='andarium-ctl proxy clear'
 alias certs-sync='andarium-ctl certs sync'
 alias webui='andarium-ctl webui open'
+alias wb='andarium-workbench'
+alias spoof='andarium-spoof'
+alias fw='andarium-net'
+alias auto='andarium-auto'
+alias macro='andarium-auto macro'
 
 proxy_on() {
     andarium-ctl proxy set "$1"

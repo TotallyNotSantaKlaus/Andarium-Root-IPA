@@ -32,11 +32,19 @@
     .\companion.ps1 -Action backup -Arg .\andarium-backup.json
 #>
 param(
-    [ValidateSet("status", "shell", "webui", "frida", "frida-stop", "ssh-setup", "ssh", "mitm", "proxy-clear", "mode", "root", "backup", "install-bundled", "stealth", "selinux", "install", "logcat", "audit")]
+    [ValidateSet(
+        "status", "shell", "webui", "frida", "frida-stop", "frida-inject",
+        "pcap-start", "pcap-stop", "pcap-pull",
+        "spoof", "firewall", "tproxy", "dns", "debloat", "macro",
+        "ssh-setup", "ssh", "mitm", "proxy-clear", "mode", "root",
+        "backup", "install-bundled", "stealth", "selinux", "install",
+        "logcat", "audit", "update-check"
+    )]
     [string]$Action = "status",
     [string]$Connect,
     [string]$Serial,
     [string]$Arg,
+    [string]$Arg2,
     [string]$Proxy,
     [int]$SshPort = 2222
 )
@@ -100,6 +108,66 @@ switch ($Action) {
         Invoke-Adb @("shell", "su", "-c", "andarium-ctl frida stop")
         & adb forward --remove tcp:27042 2>$null
         Write-Host "[companion] Frida Server stopped." -ForegroundColor Yellow
+    }
+    "frida-inject" {
+        if (-not $Arg) { throw "Usage: -Action frida-inject -Arg <package> -Arg2 <script.js> (default: ssl-pinning-bypass.js)" }
+        $script = if ($Arg2) { $Arg2 } else { "ssl-pinning-bypass.js" }
+        Invoke-Adb @("shell", "su", "-c", "andarium-workbench frida-run spawn '$Arg' '$script'")
+    }
+    "pcap-start" {
+        $bpf = if ($Arg) { $Arg } else { "" }
+        Invoke-Adb @("shell", "su", "-c", "andarium-workbench pcap-start '$bpf'")
+    }
+    "pcap-stop" {
+        Invoke-Adb @("shell", "su", "-c", "andarium-workbench pcap-stop")
+    }
+    "pcap-pull" {
+        $dest = if ($Arg) { $Arg } else { ".\pcaps" }
+        New-Item -ItemType Directory -Force -Path $dest | Out-Null
+        $list = Invoke-AdbCapture @("shell", "su", "-c", "ls -1 /data/adb/andarium/pcaps/*.pcap* 2>/dev/null || true")
+        $files = @($list -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -like "*capture-*" })
+        if ($files.Count -eq 0) { Write-Host "[companion] No PCAP files found." -ForegroundColor Yellow; break }
+        foreach ($rf in $files) {
+            $bn = Split-Path -Leaf $rf
+            Invoke-Adb @("shell", "su", "-c", "cp -f '$rf' /data/local/tmp/$bn && chmod 0644 /data/local/tmp/$bn")
+            Invoke-Adb @("pull", "/data/local/tmp/$bn", (Join-Path $dest $bn))
+            Invoke-Adb @("shell", "rm -f /data/local/tmp/$bn")
+        }
+        Write-Host "[companion] Pulled $($files.Count) PCAP file(s) to $dest" -ForegroundColor Green
+    }
+    "spoof" {
+        if (-not $Arg) { Invoke-Adb @("shell", "su", "-c", "andarium-spoof status") }
+        else { Invoke-Adb @("shell", "su", "-c", "andarium-spoof set-profile '$Arg'") }
+    }
+    "firewall" {
+        if (-not $Arg) { Invoke-Adb @("shell", "su", "-c", "andarium-net fw-list") }
+        elseif ($Arg -eq "flush") { Invoke-Adb @("shell", "su", "-c", "andarium-net fw-flush") }
+        elseif ($Arg2 -eq "unblock") { Invoke-Adb @("shell", "su", "-c", "andarium-net fw-unblock '$Arg'") }
+        else { Invoke-Adb @("shell", "su", "-c", "andarium-net fw-block '$Arg'") }
+    }
+    "tproxy" {
+        if (-not $Arg -or $Arg -eq "clear") { Invoke-Adb @("shell", "su", "-c", "andarium-net tproxy-clear") }
+        else {
+            $scope = if ($Arg2) { $Arg2 } else { "all" }
+            Invoke-Adb @("shell", "su", "-c", "andarium-net tproxy-set '$Arg' '$scope' '80,443'")
+        }
+    }
+    "dns" {
+        $preset = if ($Arg) { $Arg } else { "cloudflare" }
+        Invoke-Adb @("shell", "su", "-c", "andarium-net dns-set '$preset'")
+    }
+    "debloat" {
+        if (-not $Arg) { Invoke-Adb @("shell", "su", "-c", "andarium-auto debloat-list") }
+        elseif ($Arg -eq "restore-all") { Invoke-Adb @("shell", "su", "-c", "andarium-auto restore-all") }
+        elseif ($Arg2 -eq "unfreeze") { Invoke-Adb @("shell", "su", "-c", "andarium-auto unfreeze '$Arg'") }
+        else { Invoke-Adb @("shell", "su", "-c", "andarium-auto freeze '$Arg'") }
+    }
+    "macro" {
+        $m = if ($Arg) { $Arg } else { "dump-env" }
+        Invoke-Adb @("shell", "su", "-c", "andarium-auto macro '$m'")
+    }
+    "update-check" {
+        & "$PSScriptRoot\update.ps1"
     }
     "ssh-setup" {
         $keyFile = $Arg

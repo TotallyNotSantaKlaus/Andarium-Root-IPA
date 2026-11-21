@@ -1,6 +1,6 @@
 id=andarium_control
-name=Andarium Root Control
-version=v4.0
-versionCode=400
+name=Andarium Root Control Panel
+version=v5.0
+versionCode=500
 author=Andarium Root
-description=Control Panel v4: Live Mode Presets (Dev/Pentest/Gamer/Stealth), Root Hide/Restore, Visual Per-App SU & DenyList Manager, Bundled App Storefront, HTTP Proxy, Conscrypt CA Sync, Tweaks & Config Backup.
+description=On-device WebUI (v5) for Root/Modes, RE Workbench (frida-inject/PCAP/logcat/SQLite), Firewall & Transparent MITM, Device/FPS Spoofing, TrickyStore, Debloater & Task Scheduler.

@@ -262,5 +262,14 @@ if [ -x "$CTL" ]; then
     [ "$ROOT_ENABLED" = "1" ] && "$CTL" webui start >/dev/null 2>&1 || true
 fi
 
-echo "=== [andarium_boot_complete v4] done ==="
+# 8. Re-apply persisted Per-App Firewall, Transparent MITM Proxy & Scheduler (v5)
+if [ -x "$ODM_ROOT/scripts/andarium-net" ]; then
+    [ -s "$STATE_DIR/firewall-blocked.list" ] && "$ODM_ROOT/scripts/andarium-net" fw-apply 2>&1 || true
+    [ -s "$STATE_DIR/tproxy.conf" ] && "$ODM_ROOT/scripts/andarium-net" tproxy-apply 2>&1 || true
+fi
+if [ "$ROOT_ENABLED" = "1" ] && [ -x "$ODM_ROOT/scripts/andarium-auto" ]; then
+    "$ODM_ROOT/scripts/andarium-auto" sched-start 2>&1 || true
+fi
+
+echo "=== [andarium_boot_complete v5] done ==="
 exit 0

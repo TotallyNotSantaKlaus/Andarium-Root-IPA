@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "stock": {
+      "name": "Stock (Kernarium / LineageOS 24)",
+      "tagline": "No device identity override — uses native Andarium properties",
+      "category": "stock",
+      "props": {}
+    },
+    "pixel9pro": {
+      "name": "Google Pixel 9 Pro",
+      "tagline": "Flagship Google identity (caiman) — ideal for Play Integrity, banking & Google apps",
+      "category": "stealth",
+      "props": {
+        "ro.product.brand": "google",
+        "ro.product.manufacturer": "Google",
+        "ro.product.model": "Pixel 9 Pro",
+        "ro.product.name": "caiman",
+        "ro.product.device": "caiman",
+        "ro.product.board": "caiman",
+        "ro.build.fingerprint": "google/caiman/caiman:15/AP4A.250205.002/12821495:user/release-keys",
+        "ro.build.id": "AP4A.250205.002",
+        "ro.build.version.security_patch": "2025-02-05",
+        "ro.build.tags": "release-keys",
+        "ro.build.type": "user"
+      }
+    },
+    "s25ultra": {
+      "name": "Samsung Galaxy S25 Ultra",
+      "tagline": "Flagship Samsung Snapdragon 8 Elite profile (pa3q)",
+      "category": "daily",
+      "props": {
+        "ro.product.brand": "samsung",
+        "ro.product.manufacturer": "samsung",
+        "ro.product.model": "SM-S938B",
+        "ro.product.name": "pa3qxxx",
+        "ro.product.device": "pa3q",
+        "ro.product.board": "sun",
+        "ro.build.fingerprint": "samsung/pa3qxxx/pa3q:15/AP3A.240905.015.A2/S938BXXU1AYB4:user/release-keys",
+        "ro.build.id": "AP3A.240905.015.A2",
+        "ro.build.version.security_patch": "2025-02-01",
+        "ro.build.tags": "release-keys",
+        "ro.build.type": "user"
+      }
+    },
+    "rog9": {
+      "name": "ASUS ROG Phone 9 Pro (120 FPS)",
+      "tagline": "Gaming identity — unlocks 90/120 FPS & Ultra graphics tiers in supported Android games",
+      "category": "gaming",
+      "props": {
+        "ro.product.brand": "asus",
+        "ro.product.manufacturer": "asus",
+        "ro.product.model": "ASUS_AI2501",
+        "ro.product.name": "WW_AI2501",
+        "ro.product.device": "AI2501",
+        "ro.product.board": "sun",
+        "ro.build.fingerprint": "asus/WW_AI2501/AI2501:15/AQ3A.240812.002/35.1810.1810.220:user/release-keys",
+        "ro.build.id": "AQ3A.240812.002",
+        "ro.build.version.security_patch": "2025-01-05",
+        "ro.build.tags": "release-keys",
+        "ro.build.type": "user"
+      }
+    },
+    "redmagic10": {
+      "name": "RedMagic 10 Pro (Gaming)",
+      "tagline": "High-refresh Nubia gaming flagship profile (NX789J) for mobile shooters & RPGs",
+      "category": "gaming",
+      "props": {
+        "ro.product.brand": "nubia",
+        "ro.product.manufacturer": "nubia",
+        "ro.product.model": "NX789J",
+        "ro.product.name": "NX789J_EEA",
+        "ro.product.device": "NX789J",
+        "ro.product.board": "sun",
+        "ro.build.fingerprint": "nubia/NX789J_EEA/NX789J:15/AQ3A.240812.002/20250115:user/release-keys",
+        "ro.build.id": "AQ3A.240812.002",
+        "ro.build.version.security_patch": "2025-01-05",
+        "ro.build.tags": "release-keys",
+        "ro.build.type": "user"
+      }
+    },
+    "xiaomi15u": {
+      "name": "Xiaomi 15 Ultra",
+      "tagline": "Global Xiaomi flagship profile (xuanyuan)",
+      "category": "daily",
+      "props": {
+        "ro.product.brand": "Xiaomi",
+        "ro.product.manufacturer": "Xiaomi",
+        "ro.product.model": "25010PN30G",
+        "ro.product.name": "xuanyuan_global",
+        "ro.product.device": "xuanyuan",
+        "ro.product.board": "sun",
+        "ro.build.fingerprint": "Xiaomi/xuanyuan_global/xuanyuan:15/AQ3A.240812.002/OS2.0.104.0.VOAMIXM:user/release-keys",
+        "ro.build.id": "AQ3A.240812.002",
+        "ro.build.version.security_patch": "2025-02-01",
+        "ro.build.tags": "release-keys",
+        "ro.build.type": "user"
+      }
+    }
+  },
+  "debloat_catalog": [
+    { "package": "org.lineageos.jelly", "label": "LineageOS Browser (Jelly)", "category": "apps" },
+    { "package": "org.lineageos.etar", "label": "LineageOS Calendar (Etar)", "category": "apps" },
+    { "package": "org.lineageos.eleven", "label": "LineageOS Music (Eleven)", "category": "media" },
+    { "package": "org.lineageos.recorder", "label": "LineageOS Recorder", "category": "media" },
+    { "package": "org.lineageos.glimpse", "label": "LineageOS Gallery (Glimpse)", "category": "media" },
+    { "package": "org.lineageos.aperture", "label": "LineageOS Camera (Aperture)", "category": "media" },
+    { "package": "org.lineageos.twelve", "label": "LineageOS Music (Twelve)", "category": "media" },
+    { "package": "com.android.deskclock", "label": "Clock", "category": "apps" },
+    { "package": "com.android.calculator2", "label": "Calculator", "category": "apps" },
+    { "package": "com.android.contacts", "label": "Contacts", "category": "comms" },
+    { "package": "com.android.messaging", "label": "Messaging (SMS)", "category": "comms" },
+    { "package": "com.android.dialer", "label": "Phone Dialer", "category": "comms" },
+    { "package": "com.android.gallery3d", "label": "AOSP Gallery", "category": "media" },
+    { "package": "com.android.quicksearchbox", "label": "Quick Search Box", "category": "apps" }
+  ],
+  "protected_packages": [
+    "android",
+    "com.android.systemui",
+    "com.android.settings",
+    "com.android.shell",
+    "com.android.providers.settings",
+    "com.android.providers.downloads",
+    "com.android.providers.media",
+    "com.android.providers.media.module",
+    "com.android.keychain",
+    "com.android.inputmethod.latin",
+    "com.android.packageinstaller",
+    "com.android.permissioncontroller",
+    "com.android.webview",
+    "com.google.android.webview",
+    "com.topjohnwu.magisk"
+  ]
+}

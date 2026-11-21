@@ -1,25 +1,35 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// AndariumRootPreboot.dylib — Native iOS Pre-Boot Setup Studio injected into Andarium.app.
-// Presents a floating "# Root Setup" pill on Andarium's Home screen (BEFORE clicking Start)
-// and dynamically supplies sanitized `androidboot.ar.*` flags to the guest kernel via
-// redirecting only `/boot/kernel-command-line.txt` in KRuntime_Android_6_18_4K.
+// AndariumRootPreboot.dylib (v5 / Pre-Boot Studio v2) — Native iOS Pre-Boot Setup Studio.
+// 1. Pre-main() constructor injects saved VM Hardware & Multi-VM Slot env overrides
+//    (ANDARIUM_GUEST_INSTANCE, KERNARIUM_VCPU_COUNT, KERNARIUM_GUEST_MEMORY_MIB,
+//     KERNARIUM_ANDROID_DISK_SIZE_GIB, KERNARIUM_DISPLAY_SCALE, ANDARIUM_THERMAL_STATE,
+//     ANDARIUM_HAPTICS) + `andarium.stats` HUD preference before Swift AppEntry starts.
+// 2. Presents floating "# Root Setup" pill on Andarium Home screen (hidden during Metal VM).
+// 3. Dynamically feeds sanitized `androidboot.ar.cfg=5,...` (root, preset, spoof, modules,
+//    services, apps, tweaks, proxy) via fishhook on `/boot/kernel-command-line.txt`.
+// 4. Persists per-slot configs and user-created Custom Presets (create/delete/import/export).
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
 #import <sys/stat.h>
 #import <stdio.h>
+#import <stdlib.h>
 #import <string.h>
 #import "fishhook.h"
 
-static NSString *const kConfigDefaultsKey = @"AndariumRootPrebootConfigV4";
+static NSString *const kLegacyConfigKey   = @"AndariumRootPrebootConfigV4";
 static NSString *const kConfigRevisionKey = @"AndariumRootPrebootRevisionV4";
-static NSString *const kCmdlineSuffix     = @"/boot/kernel-command-line.txt";
+static NSString *const kHardwareKey       = @"AndariumRootVmHardwareV5";
+static NSString *const kCustomPresetsKey  = @"AndariumRootCustomPresetsV5";
+static NSString *const kSlotListKey       = @"AndariumRootVmSlotsV5";
 
 static int   (*orig_lstat)(const char *, struct stat *) = NULL;
 static FILE *(*orig_fopen)(const char *, const char *)  = NULL;
 
 static char g_override_cmdline_path[PATH_MAX] = {0};
+static NSString *g_active_slot = @"default";
+static NSString *g_launch_hw_sig = @"";
 
 static BOOL ar_is_cmdline_path(const char *path) {
     if (!path || g_override_cmdline_path[0] == '\0') return NO;
@@ -28,7 +38,6 @@ static BOOL ar_is_cmdline_path(const char *path) {
     size_t slen = strlen(suffix);
     if (len < slen) return NO;
     if (strcmp(path + (len - slen), suffix) != 0) return NO;
-    // Never redirect our own override path
     if (strcmp(path, g_override_cmdline_path) == 0) return NO;
     return YES;
 }
@@ -71,26 +80,159 @@ static NSDictionary *ar_load_defaults_json(void) {
     return [obj isKindOfClass:[NSDictionary class]] ? obj : @{};
 }
 
-static NSDictionary *ar_current_config(void) {
-    NSString *saved = [[NSUserDefaults standardUserDefaults] stringForKey:kConfigDefaultsKey];
-    if (saved.length > 0) {
-        id obj = [NSJSONSerialization JSONObjectWithData:[saved dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
-        if ([obj isKindOfClass:[NSDictionary class]]) {
-            return obj;
-        }
+static NSDictionary *ar_load_json_dict_key(NSString *key) {
+    NSString *saved = [[NSUserDefaults standardUserDefaults] stringForKey:key];
+    if (saved.length == 0) return @{};
+    id obj = [NSJSONSerialization JSONObjectWithData:[saved dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+    return [obj isKindOfClass:[NSDictionary class]] ? obj : @{};
+}
+
+static void ar_save_json_obj(id obj, NSString *key) {
+    if (!obj) return;
+    NSData *d = [NSJSONSerialization dataWithJSONObject:obj options:0 error:nil];
+    if (!d) return;
+    NSString *s = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
+    if (!s) return;
+    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+    [ud setObject:s forKey:key];
+    [ud synchronize];
+}
+
+static NSString *ar_sanitize_slot(NSString *raw) {
+    if (![raw isKindOfClass:[NSString class]] || raw.length == 0) return @"default";
+    NSString *s = ar_sanitize_token(raw, @"^[A-Za-z0-9_-]{1,32}$", @"default");
+    return [s isEqualToString:@"default"] ? @"default" : s;
+}
+
+static NSDictionary *ar_current_hardware(void) {
+    NSDictionary *saved = ar_load_json_dict_key(kHardwareKey);
+    NSString *slot = ar_sanitize_slot(saved[@"slot"]);
+    NSInteger vcpu = [saved[@"vcpu"] integerValue];
+    NSInteger memMiB = [saved[@"mem_mib"] integerValue];
+    NSInteger diskGiB = [saved[@"disk_gib"] integerValue];
+    NSString *scale = ar_sanitize_token(saved[@"display_scale"], @"^(auto|native|1\\.0|1\\.5|2\\.0|3\\.0)$", @"auto");
+    BOOL thermalNom = [saved[@"thermal_nominal"] boolValue];
+    BOOL statsHud = [saved[@"stats_hud"] boolValue];
+    BOOL hapticsOff = [saved[@"haptics_off"] boolValue];
+    return @{
+        @"slot": slot,
+        @"vcpu": @(vcpu),
+        @"mem_mib": @(memMiB),
+        @"disk_gib": @(diskGiB),
+        @"display_scale": scale,
+        @"thermal_nominal": @(thermalNom),
+        @"stats_hud": @(statsHud),
+        @"haptics_off": @(hapticsOff),
+    };
+}
+
+static NSString *ar_hw_signature(NSDictionary *hw) {
+    return [NSString stringWithFormat:@"%@|%@|%@|%@|%@|%@|%@",
+            hw[@"slot"] ?: @"default", hw[@"vcpu"] ?: @0, hw[@"mem_mib"] ?: @0,
+            hw[@"disk_gib"] ?: @0, hw[@"display_scale"] ?: @"auto",
+            hw[@"thermal_nominal"] ?: @0, hw[@"haptics_off"] ?: @0];
+}
+
+static void ar_apply_vm_hardware_env(void) {
+    NSDictionary *hw = ar_current_hardware();
+    g_active_slot = hw[@"slot"] ?: @"default";
+    g_launch_hw_sig = ar_hw_signature(hw);
+
+    if (![g_active_slot isEqualToString:@"default"]) {
+        setenv("ANDARIUM_GUEST_INSTANCE", g_active_slot.UTF8String, 1);
     }
+
+    NSInteger maxCpu = (NSInteger)NSProcessInfo.processInfo.activeProcessorCount;
+    if (maxCpu < 1) maxCpu = 1;
+    NSInteger vcpu = [hw[@"vcpu"] integerValue];
+    if (vcpu >= 1 && vcpu <= maxCpu) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%ld", (long)vcpu);
+        setenv("KERNARIUM_VCPU_COUNT", buf, 1);
+    }
+
+    NSInteger memMiB = [hw[@"mem_mib"] integerValue];
+    if (memMiB >= 512 && memMiB <= 16384 && (memMiB % 64) == 0) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%ld", (long)memMiB);
+        setenv("KERNARIUM_GUEST_MEMORY_MIB", buf, 1);
+    }
+
+    NSInteger diskGiB = [hw[@"disk_gib"] integerValue];
+    if (diskGiB >= 4 && diskGiB <= 64) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%ld", (long)diskGiB);
+        setenv("KERNARIUM_ANDROID_DISK_SIZE_GIB", buf, 1);
+    }
+
+    NSString *scale = hw[@"display_scale"];
+    if ([scale isKindOfClass:[NSString class]] && scale.length > 0 && ![scale isEqualToString:@"auto"]) {
+        setenv("KERNARIUM_DISPLAY_SCALE", scale.UTF8String, 1);
+    }
+
+    if ([hw[@"thermal_nominal"] boolValue]) {
+        setenv("ANDARIUM_THERMAL_STATE", "nominal", 1);
+    }
+    if ([hw[@"haptics_off"] boolValue]) {
+        setenv("ANDARIUM_HAPTICS", "0", 1);
+    }
+
+    // Sync Andarium's native FPS/CPU/RAM Stats HUD preference when explicitly saved
+    NSDictionary *rawSaved = ar_load_json_dict_key(kHardwareKey);
+    if (rawSaved[@"stats_hud"] != nil) {
+        [[NSUserDefaults standardUserDefaults] setBool:[rawSaved[@"stats_hud"] boolValue] forKey:@"andarium.stats"];
+    }
+}
+
+static NSString *ar_config_key_for_slot(NSString *slot) {
+    NSString *s = ar_sanitize_slot(slot);
+    if ([s isEqualToString:@"default"]) return kLegacyConfigKey;
+    return [NSString stringWithFormat:@"AndariumRootPrebootConfigV5_%@", s];
+}
+
+static NSString *ar_rev_key_for_slot(NSString *slot) {
+    NSString *s = ar_sanitize_slot(slot);
+    if ([s isEqualToString:@"default"]) return kConfigRevisionKey;
+    return [NSString stringWithFormat:@"AndariumRootPrebootRevV5_%@", s];
+}
+
+static NSDictionary *ar_current_config_for_slot(NSString *slot) {
+    NSDictionary *saved = ar_load_json_dict_key(ar_config_key_for_slot(slot));
+    if (saved.count > 0) return saved;
     NSDictionary *defs = ar_load_defaults_json();
     NSDictionary *initCfg = defs[@"default_config"];
     return [initCfg isKindOfClass:[NSDictionary class]] ? initCfg : @{};
 }
 
-static void ar_regenerate_cmdline_file(NSDictionary *cfg) {
+static NSArray<NSString *> *ar_saved_slots(void) {
+    NSArray *arr = [[NSUserDefaults standardUserDefaults] stringArrayForKey:kSlotListKey];
+    NSMutableArray<NSString *> *out = [NSMutableArray arrayWithObjects:@"default", @"pentest", @"gamer", @"privacy", nil];
+    if ([arr isKindOfClass:[NSArray class]]) {
+        for (NSString *s in arr) {
+            NSString *clean = ar_sanitize_slot(s);
+            if (![out containsObject:clean]) [out addObject:clean];
+        }
+    }
+    if (![out containsObject:g_active_slot]) [out addObject:g_active_slot];
+    return out;
+}
+
+static void ar_register_slot(NSString *slot) {
+    NSString *clean = ar_sanitize_slot(slot);
+    NSMutableArray<NSString *> *cur = [ar_saved_slots() mutableCopy];
+    if (![cur containsObject:clean]) {
+        [cur addObject:clean];
+        [[NSUserDefaults standardUserDefaults] setObject:cur forKey:kSlotListKey];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+    }
+}
+
+static void ar_regenerate_cmdline_file(NSDictionary *cfg, NSString *slot) {
     NSString *stockPath = [[NSBundle mainBundle].resourcePath
                            stringByAppendingPathComponent:@"andarium-system/boot/kernel-command-line.txt"];
     NSString *stockText = [NSString stringWithContentsOfFile:stockPath encoding:NSUTF8StringEncoding error:nil];
     if (stockText.length == 0) return;
 
-    // Strip any build-time androidboot.ar.* tokens so live iOS settings override cleanly
     NSMutableArray<NSString *> *words = [NSMutableArray array];
     for (NSString *w in [stockText componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]) {
         if (w.length == 0) continue;
@@ -98,7 +240,7 @@ static void ar_regenerate_cmdline_file(NSDictionary *cfg) {
         [words addObject:w];
     }
 
-    NSString *preset  = ar_sanitize_token(cfg[@"preset"], @"^[a-z0-9_-]{1,20}$", @"mix");
+    NSString *preset  = ar_sanitize_token(cfg[@"preset"], @"^[a-z0-9_-]{1,16}$", @"mix");
     BOOL rootOn       = cfg[@"root_enabled"] ? [cfg[@"root_enabled"] boolValue] : YES;
     NSString *selinux = [cfg[@"selinux"] isEqualToString:@"enforcing"] ? @"1" : @"0";
     BOOL stealthOn    = [cfg[@"stealth"] boolValue];
@@ -135,14 +277,16 @@ static void ar_regenerate_cmdline_file(NSDictionary *cfg) {
     NSString *swap  = ar_sanitize_token([twks[@"swappiness"] description], @"^[0-9]{1,3}$", @"100");
     NSString *awake = [twks[@"stay_awake"] boolValue] ? @"1" : @"0";
     NSString *dpi   = ar_sanitize_token([twks[@"dpi"] description], @"^(0|[0-9]{3})$", @"0");
+    NSString *spoof = ar_sanitize_token(cfg[@"spoof_profile"], @"^[a-z0-9_-]{1,16}$", @"stock");
     NSString *proxy = ar_sanitize_token(cfg[@"proxy"], @"^[a-zA-Z0-9.:_-]{3,64}$", @"none");
-    NSInteger rev   = [[NSUserDefaults standardUserDefaults] integerForKey:kConfigRevisionKey];
+
+    NSInteger rev   = [[NSUserDefaults standardUserDefaults] integerForKey:ar_rev_key_for_slot(slot)];
     if (rev <= 0) rev = 1;
 
-    NSString *cfgToken = [NSString stringWithFormat:@"4,%ld,%@,%d,%@,%d,%d,%d,%@,%@,%@,%@,%@,%@,%@",
+    NSString *cfgToken = [NSString stringWithFormat:@"5,%ld,%@,%d,%@,%d,%d,%d,%@,%@,%@,%@,%@,%@,%@,%@",
                           (long)rev, preset, rootOn ? 1 : 0, selinux, stealthOn ? 1 : 0,
                           adbrootOn ? 1 : 0, dbgOn ? 1 : 0, modsBits, svcsBits, appsBits,
-                          anim, swap, awake, dpi];
+                          anim, swap, awake, dpi, spoof];
 
     [words addObject:[NSString stringWithFormat:@"androidboot.ar.preset=%@", preset]];
     [words addObject:[NSString stringWithFormat:@"androidboot.ar.cfg=%@", cfgToken]];
@@ -153,13 +297,14 @@ static void ar_regenerate_cmdline_file(NSDictionary *cfg) {
     NSString *finalCmdline = [[words componentsJoinedByString:@" "] stringByAppendingString:@"\n"];
     NSString *cachesDir = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject;
     if (!cachesDir) return;
-    NSString *outPath = [cachesDir stringByAppendingPathComponent:@"andarium-root-cmdline.txt"];
+    NSString *outName = [NSString stringWithFormat:@"andarium-root-cmdline-%@.txt", ar_sanitize_slot(slot)];
+    NSString *outPath = [cachesDir stringByAppendingPathComponent:outName];
     if ([finalCmdline writeToFile:outPath atomically:YES encoding:NSUTF8StringEncoding error:nil]) {
         strlcpy(g_override_cmdline_path, outPath.fileSystemRepresentation, sizeof(g_override_cmdline_path));
     }
 }
 
-// MARK: - Native Pre-Boot Setup ViewController
+// MARK: - Native Pre-Boot Setup ViewController (v2)
 
 @interface ARPrebootViewController : UIViewController <WKScriptMessageHandler, WKNavigationDelegate>
 @property (nonatomic, strong) WKWebView *webView;
@@ -192,9 +337,22 @@ static void ar_regenerate_cmdline_file(NSDictionary *cfg) {
 }
 
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
+    NSDictionary *hw = ar_current_hardware();
+    NSString *slot = hw[@"slot"] ?: @"default";
+    NSArray<NSString *> *slots = ar_saved_slots();
+    NSMutableDictionary *slotCfgs = [NSMutableDictionary dictionaryWithCapacity:slots.count];
+    for (NSString *s in slots) {
+        slotCfgs[s] = ar_current_config_for_slot(s);
+    }
     NSDictionary *payload = @{
         @"defaults": ar_load_defaults_json(),
-        @"config": ar_current_config(),
+        @"config": ar_current_config_for_slot(slot),
+        @"slot_configs": slotCfgs,
+        @"hardware": hw,
+        @"active_slot": g_active_slot ?: @"default",
+        @"slots": slots,
+        @"custom_presets": ar_load_json_dict_key(kCustomPresetsKey),
+        @"host_cpus": @((NSInteger)NSProcessInfo.processInfo.activeProcessorCount),
     };
     NSData *json = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
     if (!json) return;
@@ -211,20 +369,63 @@ static void ar_regenerate_cmdline_file(NSDictionary *cfg) {
 
     if ([type isEqualToString:@"save"]) {
         NSDictionary *cfg = msg[@"config"];
+        NSDictionary *hwIn = msg[@"hardware"];
+        NSString *targetSlot = g_active_slot ?: @"default";
+        BOOL needsRelaunch = NO;
+
+        if ([hwIn isKindOfClass:[NSDictionary class]]) {
+            targetSlot = ar_sanitize_slot(hwIn[@"slot"]);
+            ar_register_slot(targetSlot);
+            NSMutableDictionary *cleanHw = [hwIn mutableCopy];
+            cleanHw[@"slot"] = targetSlot;
+            ar_save_json_obj(cleanHw, kHardwareKey);
+            if (cleanHw[@"stats_hud"] != nil) {
+                [[NSUserDefaults standardUserDefaults] setBool:[cleanHw[@"stats_hud"] boolValue] forKey:@"andarium.stats"];
+                [[NSUserDefaults standardUserDefaults] synchronize];
+            }
+            NSString *newSig = ar_hw_signature(ar_current_hardware());
+            needsRelaunch = ![newSig isEqualToString:g_launch_hw_sig];
+        }
+
         if ([cfg isKindOfClass:[NSDictionary class]]) {
-            NSData *d = [NSJSONSerialization dataWithJSONObject:cfg options:0 error:nil];
-            if (d) {
-                NSString *s = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
-                NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
-                NSInteger prev = [ud integerForKey:kConfigRevisionKey];
-                NSInteger rev = (prev < 1 ? 1 : prev) + 1;
-                [ud setInteger:rev forKey:kConfigRevisionKey];
-                [ud setObject:s forKey:kConfigDefaultsKey];
-                [ud synchronize];
-                ar_regenerate_cmdline_file(cfg);
+            NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+            NSString *revKey = ar_rev_key_for_slot(targetSlot);
+            NSInteger prev = [ud integerForKey:revKey];
+            NSInteger rev = (prev < 1 ? 1 : prev) + 1;
+            [ud setInteger:rev forKey:revKey];
+            ar_save_json_obj(cfg, ar_config_key_for_slot(targetSlot));
+            if ([targetSlot isEqualToString:g_active_slot]) {
+                ar_regenerate_cmdline_file(cfg, targetSlot);
             }
         }
-        [self dismissViewControllerAnimated:YES completion:nil];
+
+        if (needsRelaunch) {
+            UIAlertController *ac = [UIAlertController
+                alertControllerWithTitle:@"VM Slot / Hardware Saved"
+                                 message:@"Your root & preset flags are saved. Because you changed the VM Slot or vCPU/RAM/Display hardware, close and reopen Andarium Root before tapping Start Emulation."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+                [self dismissViewControllerAnimated:YES completion:nil];
+            }]];
+            [self presentViewController:ac animated:YES completion:nil];
+        } else {
+            [self dismissViewControllerAnimated:YES completion:nil];
+        }
+    } else if ([type isEqualToString:@"save_custom_preset"]) {
+        NSString *pid = ar_sanitize_token(msg[@"id"], @"^[a-z0-9_-]{1,24}$", @"");
+        NSDictionary *pdata = msg[@"preset"];
+        if (pid.length > 0 && [pdata isKindOfClass:[NSDictionary class]]) {
+            NSMutableDictionary *all = [ar_load_json_dict_key(kCustomPresetsKey) mutableCopy];
+            all[pid] = pdata;
+            ar_save_json_obj(all, kCustomPresetsKey);
+        }
+    } else if ([type isEqualToString:@"delete_custom_preset"]) {
+        NSString *pid = ar_sanitize_token(msg[@"id"], @"^[a-z0-9_-]{1,24}$", @"");
+        if (pid.length > 0) {
+            NSMutableDictionary *all = [ar_load_json_dict_key(kCustomPresetsKey) mutableCopy];
+            [all removeObjectForKey:pid];
+            ar_save_json_obj(all, kCustomPresetsKey);
+        }
     } else if ([type isEqualToString:@"export"]) {
         NSString *jsonText = msg[@"text"];
         if ([jsonText isKindOfClass:[NSString class]] && jsonText.length > 0) {
@@ -297,7 +498,6 @@ static void ar_regenerate_cmdline_file(NSDictionary *cfg) {
             [self.pillButton.heightAnchor constraintEqualToConstant:36.0],
         ]];
     }
-    // Automatically hide pill while Android VM display (MTKView) is active
     BOOL vmRunning = [self containsMetalGuestView:win.rootViewController.view];
     self.pillButton.hidden = vmRunning;
     if (!vmRunning) {
@@ -311,7 +511,10 @@ static void ar_regenerate_cmdline_file(NSDictionary *cfg) {
 
     if (!self.pillButton) {
         UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-        [btn setTitle:@" # Root Setup " forState:UIControlStateNormal];
+        NSString *title = [g_active_slot isEqualToString:@"default"]
+            ? @" # Root Setup "
+            : [NSString stringWithFormat:@" # Setup · %@ ", g_active_slot];
+        [btn setTitle:title forState:UIControlStateNormal];
         [btn setTitleColor:[UIColor colorWithRed:0.20 green:0.96 blue:0.63 alpha:1.0] forState:UIControlStateNormal];
         btn.titleLabel.font = [UIFont systemFontOfSize:13.5 weight:UIFontWeightBold];
         btn.backgroundColor = [UIColor colorWithRed:0.05 green:0.11 blue:0.09 alpha:0.92];
@@ -360,7 +563,9 @@ static void ar_regenerate_cmdline_file(NSDictionary *cfg) {
 __attribute__((constructor))
 static void ar_preboot_init(void) {
     @autoreleasepool {
-        ar_regenerate_cmdline_file(ar_current_config());
+        // Apply VM Slot & Hardware env overrides BEFORE Swift AppEntry.fromArguments() runs
+        ar_apply_vm_hardware_env();
+        ar_regenerate_cmdline_file(ar_current_config_for_slot(g_active_slot), g_active_slot);
 
         struct ar_rebinding rebindings[2] = {
             {"lstat", (void *)ar_hooked_lstat, (void **)&orig_lstat},

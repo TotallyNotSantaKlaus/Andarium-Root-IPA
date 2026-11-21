@@ -73,6 +73,14 @@
       "sha256": "a2007a0f3a8bcbbc3ee165b5d7904970a59b2a769310d751d68cfa405145432f",
       "size": 24700332
     },
+    "frida_inject": {
+      "name": "frida-inject-17.27.4-android-arm64.xz",
+      "version": "17.27.4",
+      "group": "pentest",
+      "url": "https://github.com/frida/frida/releases/download/17.27.4/frida-inject-17.27.4-android-arm64.xz",
+      "sha256": "2eab2e85e5634398e71e2d9c8d80228a96f638115e5f8ed83e6a77ec2b8379ad",
+      "size": 24637712
+    },
     "dropbear": {
       "name": "dropbear-2026.94-aarch64-android.zip",
       "version": "2026.94",

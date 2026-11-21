@@ -33,7 +33,7 @@ if [ -f "$LOG_FILE" ]; then
 fi
 
 exec >> "$LOG_FILE" 2>&1
-echo "=== [andarium_early_init v4] boot start (MAGISKTMP=$MAGISKTMP) ==="
+echo "=== [andarium_early_init v5] boot start (MAGISKTMP=$MAGISKTMP) ==="
 
 # Helper: extract an `androidboot.ar.<key>=<val>` token from /proc/cmdline
 get_cmdline_arg() {
@@ -74,13 +74,13 @@ if [ -n "$AR_CFG" ]; then
     AR_STEALTH="$6"; AR_ADBROOT="$7"; AR_DBG="$8"; AR_MODS="$9"
     shift 9 2>/dev/null || true
     AR_SVCS="${1:-001}"; AR_APPS="${2:-1111111111111}"; AR_ANIM="${3:-0.5}"
-    AR_SWAP="${4:-100}"; AR_AWAKE="${5:-0}"; AR_DPI="${6:-0}"
+    AR_SWAP="${4:-100}"; AR_AWAKE="${5:-0}"; AR_DPI="${6:-0}"; AR_SPOOF="${7:-}"
     AR_PROXY="$(get_cmdline_arg proxy || true)"
 fi
 
 LAST_REV="$(read_setting applied_preboot_rev 0)"
 if [ -n "$AR_REV" ] && [ "$AR_REV" != "$LAST_REV" ]; then
-    echo "[early] applying pre-boot config rev=$AR_REV (prev=$LAST_REV, preset=${AR_PRESET:-mix}, root=${AR_ROOT:-1})"
+    echo "[early] applying pre-boot config rev=$AR_REV (prev=$LAST_REV, preset=${AR_PRESET:-mix}, root=${AR_ROOT:-1}, spoof=${AR_SPOOF:-stock})"
     PREV_APPS="$(read_setting apps_mask '')"
 
     write_setting active_mode "${AR_PRESET:-mix}"
@@ -97,6 +97,9 @@ if [ -n "$AR_REV" ] && [ "$AR_REV" != "$LAST_REV" ]; then
     write_setting stay_awake "${AR_AWAKE:-0}"
     [ -n "$AR_DPI" ] && [ "$AR_DPI" != "0" ] && write_setting dpi "$AR_DPI" || rm -f "$STATE_DIR/dpi"
     [ -n "$AR_PROXY" ] && [ "$AR_PROXY" != "none" ] && write_setting http_proxy "$AR_PROXY" || rm -f "$STATE_DIR/http_proxy"
+    if [ -n "$AR_SPOOF" ] && [ -x "$ODM_ROOT/scripts/andarium-spoof" ]; then
+        "$ODM_ROOT/scripts/andarium-spoof" set-profile "$AR_SPOOF" 2>&1 || true
+    fi
 
     # If the user enabled additional apps in Pre-Boot Studio, re-run selective APK pass
     if [ "$AR_APPS" != "$PREV_APPS" ]; then
@@ -170,13 +173,16 @@ if [ "$ROOT_ENABLED" = "0" ]; then
 fi
 
 # Expose CLI tools directly on root PATH ($MAGISKTMP)
-if [ -f "$ODM_ROOT/scripts/andarium-ctl" ]; then
-    ln -sf "$ODM_ROOT/scripts/andarium-ctl" "$MAGISKTMP/andarium-ctl" 2>/dev/null || true
-    ln -sf "$ODM_ROOT/scripts/andarium-ctl" "$ADB_DIR/andarium-ctl" 2>/dev/null || true
-fi
+for sbin in andarium-ctl andarium-workbench andarium-spoof andarium-net andarium-auto; do
+    if [ -f "$ODM_ROOT/scripts/$sbin" ]; then
+        ln -sf "$ODM_ROOT/scripts/$sbin" "$MAGISKTMP/$sbin" 2>/dev/null || true
+        ln -sf "$ODM_ROOT/scripts/$sbin" "$ADB_DIR/$sbin" 2>/dev/null || true
+    fi
+done
 [ -f "$ODM_ROOT/scripts/andarium-termux-setup" ] && ln -sf "$ODM_ROOT/scripts/andarium-termux-setup" "$MAGISKTMP/andarium-termux-setup" 2>/dev/null || true
 [ -f "$ODM_ROOT/scripts/andarium-shell-rc.sh" ] && [ ! -f "$STATE_DIR/profile" ] && cp -f "$ODM_ROOT/scripts/andarium-shell-rc.sh" "$STATE_DIR/profile" 2>/dev/null && chmod 0644 "$STATE_DIR/profile" 2>/dev/null || true
 [ -x "$ODM_ROOT/tools/frida-server" ] && ln -sf "$ODM_ROOT/tools/frida-server" "$MAGISKTMP/frida-server" 2>/dev/null || true
+[ -x "$ODM_ROOT/tools/frida-inject" ] && ln -sf "$ODM_ROOT/tools/frida-inject" "$MAGISKTMP/frida-inject" 2>/dev/null || true
 if [ -d "$ODM_ROOT/tools/dropbear" ]; then
     for bin in dropbear dropbearkey dropbearconvert dbclient scp; do
         [ -x "$ODM_ROOT/tools/dropbear/$bin" ] && ln -sf "$ODM_ROOT/tools/dropbear/$bin" "$MAGISKTMP/$bin" 2>/dev/null || true
@@ -269,6 +275,7 @@ if [ ! -f "$STATE_DIR/.early_provisioned_v4" ]; then
         chown -R 0:0 "$ADB_DIR/modules/tricky_store" 2>/dev/null
         chmod 0755 "$ADB_DIR/modules/tricky_store" "$ADB_DIR/modules/tricky_store/daemon" \
             "$ADB_DIR/modules/tricky_store/post-fs-data.sh" "$ADB_DIR/modules/tricky_store/service.sh" 2>/dev/null
+        [ -f "$ODM_ROOT/custom/keybox.xml" ] && [ ! -f "$ADB_DIR/tricky_store/keybox.xml" ] && cp -f "$ODM_ROOT/custom/keybox.xml" "$ADB_DIR/tricky_store/keybox.xml" && chmod 0600 "$ADB_DIR/tricky_store/keybox.xml"
         [ -f "$ODM_ROOT/config/tricky_store/keybox.xml" ] && [ ! -f "$ADB_DIR/tricky_store/keybox.xml" ] && cp -f "$ODM_ROOT/config/tricky_store/keybox.xml" "$ADB_DIR/tricky_store/keybox.xml"
         [ -f "$ODM_ROOT/config/tricky_store/target.txt" ] && [ ! -f "$ADB_DIR/tricky_store/target.txt" ] && cp -f "$ODM_ROOT/config/tricky_store/target.txt" "$ADB_DIR/tricky_store/target.txt"
         chown -R 0:0 "$ADB_DIR/tricky_store" 2>/dev/null
@@ -337,5 +344,10 @@ if [ -n "$MODS_MASK" ]; then
     fi
 fi
 
-echo "=== [andarium_early_init v4] done ==="
+# 8. Apply persisted Device Identity / Gaming FPS Spoof BEFORE Zygote spawns apps
+if [ -x "$ODM_ROOT/scripts/andarium-spoof" ]; then
+    "$ODM_ROOT/scripts/andarium-spoof" apply-saved 2>&1 || true
+fi
+
+echo "=== [andarium_early_init v5] done ==="
 exit 0

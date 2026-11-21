@@ -18,6 +18,8 @@ param(
     [string]$Profile = "ultimate",
     [ValidateSet("", "duskjade", "crimson", "cyber", "stealth", "stock")]
     [string]$IconTheme = "",
+    [ValidateSet("", "stock", "pixel9pro", "s25ultra", "rog9", "redmagic10", "xiaomi15u")]
+    [string]$Spoof = "",
     [string]$Config = "",
     [switch]$NoRoot,
     [string]$Distro = "kali-linux",
@@ -59,6 +61,9 @@ if ($Preset) {
 }
 if ($IconTheme) {
     $AllArgs += @("--icon-theme", $IconTheme)
+}
+if ($Spoof) {
+    $AllArgs += @("--spoof", $Spoof)
 }
 if ($Config) {
     $cfgResolved = (Resolve-Path $Config).Path

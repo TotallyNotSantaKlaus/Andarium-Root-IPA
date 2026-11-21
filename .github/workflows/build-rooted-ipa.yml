@@ -73,7 +73,7 @@ jobs:
           sudo apt-get install -y erofs-utils openssl
       - name: Run Python compile checks & test_builder.py
         run: |
-          python3 -m py_compile scripts/build_rooted_ipa.py scripts/verify_rooted_ipa.py scripts/live_audit.py scripts/generate_altstore_source.py scripts/macho_inject.py scripts/studio_web.py scripts/test_builder.py
+          python3 -m py_compile scripts/build_rooted_ipa.py scripts/verify_rooted_ipa.py scripts/live_audit.py scripts/generate_altstore_source.py scripts/macho_inject.py scripts/studio_web.py scripts/update_artifacts.py scripts/test_builder.py
           python3 scripts/test_builder.py
 
   build-ios-preboot-dylib:

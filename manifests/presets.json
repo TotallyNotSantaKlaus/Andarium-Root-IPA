@@ -30,6 +30,7 @@
       "modules": { "rezygisk": true, "vector": true, "stealth_stack": true },
       "services": { "adblock": true, "frida_autostart": false, "ssh_autostart": false, "shizuku_autostart": true },
       "tweaks": { "anim_scale": "0.5", "swappiness": 100, "stay_awake": false, "dpi": "default" },
+      "spoof_profile": "stock",
       "apps": ["magisk", "termux", "material_files", "microg_gms", "microg_vending", "aurora_store", "obtainium", "app_manager", "shizuku", "neo_backup", "trustmealready", "disable_flag_secure", "gps_setter"]
     },
     "seceng": {
@@ -46,6 +47,7 @@
       "modules": { "rezygisk": true, "vector": true, "stealth_stack": true },
       "services": { "adblock": false, "frida_autostart": true, "ssh_autostart": true, "shizuku_autostart": true },
       "tweaks": { "anim_scale": "0.5", "swappiness": 80, "stay_awake": true, "dpi": "default" },
+      "spoof_profile": "stock",
       "apps": ["magisk", "termux", "material_files", "microg_gms", "microg_vending", "aurora_store", "app_manager", "shizuku", "trustmealready", "disable_flag_secure", "gps_setter"]
     },
     "hacker": {
@@ -62,6 +64,7 @@
       "modules": { "rezygisk": true, "vector": true, "stealth_stack": true },
       "services": { "adblock": true, "frida_autostart": true, "ssh_autostart": true, "shizuku_autostart": true },
       "tweaks": { "anim_scale": "0", "swappiness": 100, "stay_awake": true, "dpi": "360" },
+      "spoof_profile": "stock",
       "apps": ["magisk", "termux", "material_files", "microg_gms", "microg_vending", "aurora_store", "obtainium", "app_manager", "shizuku", "neo_backup", "trustmealready", "disable_flag_secure", "gps_setter"]
     },
     "gamer": {
@@ -78,6 +81,7 @@
       "modules": { "rezygisk": true, "vector": false, "stealth_stack": true },
       "services": { "adblock": true, "frida_autostart": false, "ssh_autostart": false, "shizuku_autostart": false },
       "tweaks": { "anim_scale": "0", "swappiness": 130, "stay_awake": true, "dpi": "default" },
+      "spoof_profile": "rog9",
       "apps": ["magisk", "material_files", "microg_gms", "microg_vending", "aurora_store", "obtainium"]
     },
     "privacy": {
@@ -94,6 +98,7 @@
       "modules": { "rezygisk": true, "vector": false, "stealth_stack": true },
       "services": { "adblock": true, "frida_autostart": false, "ssh_autostart": false, "shizuku_autostart": false },
       "tweaks": { "anim_scale": "0.5", "swappiness": 100, "stay_awake": false, "dpi": "default" },
+      "spoof_profile": "pixel9pro",
       "apps": ["magisk", "material_files", "microg_gms", "microg_vending", "aurora_store", "obtainium", "neo_backup"]
     },
     "unrooted": {
@@ -110,6 +115,7 @@
       "modules": { "rezygisk": false, "vector": false, "stealth_stack": false },
       "services": { "adblock": false, "frida_autostart": false, "ssh_autostart": false, "shizuku_autostart": false },
       "tweaks": { "anim_scale": "1", "swappiness": 60, "stay_awake": false, "dpi": "default" },
+      "spoof_profile": "stock",
       "apps": ["microg_gms", "microg_vending", "aurora_store", "obtainium", "material_files"]
     }
   }

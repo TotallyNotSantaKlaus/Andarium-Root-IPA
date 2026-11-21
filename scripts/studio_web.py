@@ -31,6 +31,7 @@ MANIFESTS_DIR = ROOT_DIR / "manifests"
 DOCS_DIR = ROOT_DIR / "docs"
 DIST_DIR = ROOT_DIR / "dist"
 DEFAULT_CONFIG_PATH = ROOT_DIR / "andarium-config.json"
+CUSTOM_PRESETS_PATH = ROOT_DIR / "andarium-custom-presets.json"
 
 SESSION_TOKEN = secrets.token_hex(16)
 BUILD_LOCK = threading.Lock()
@@ -181,16 +182,21 @@ STUDIO_HTML = r"""<!DOCTYPE html>
     <div class="brand">
       <div class="badge">#</div>
       <div>
-        <h1>Andarium Root Builder Studio <span style="color:var(--accent);font-size:14px;">v4</span></h1>
-        <div class="sub">Pick a role preset, toggle Root ON/OFF, customize apps &amp; iOS icon themes, and build a verified IPA</div>
+        <h1>Andarium Root Builder Studio <span style="color:var(--accent);font-size:14px;">v5</span></h1>
+        <div class="sub">Role &amp; custom presets, Root ON/OFF, Device/120 FPS Spoof, 13 apps, iOS icons, Upstream Health Check &amp; verified IPA builder</div>
       </div>
     </div>
     <div class="pill-stat" id="est-size">Estimated IPA: ~1.30 GiB</div>
   </header>
 
   <div class="card">
-    <h2>1. Choose a Role Preset</h2>
+    <h2>1. Choose a Role Preset (or Create Custom Preset)</h2>
     <div class="preset-grid" id="preset-grid"></div>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+      <input type="text" id="cp-name" placeholder="Save current setup as custom preset (e.g. my-lab)" style="flex:1;">
+      <button class="btn" style="padding:7px 13px;font-size:12.5px;" onclick="saveCustomPreset()">+ Save Custom Preset</button>
+      <button class="btn" style="padding:7px 13px;font-size:12.5px;" onclick="importConfigPrompt()">Import JSON</button>
+    </div>
   </div>
 
   <div class="grid">
@@ -206,6 +212,17 @@ STUDIO_HTML = r"""<!DOCTYPE html>
             <option value="on">Root ON (Magisk v31.1)</option>
             <option value="hidden">Root HIDDEN by default (toggleable)</option>
             <option value="unrooted">True Unrooted (--no-root, stock init_boot)</option>
+          </select>
+        </div>
+        <div class="row">
+          <div><div class="rt">Device Identity / 120 FPS Gaming Spoof</div><div class="rd">Applied at post-fs-data via resetprop before Zygote spawns apps</div></div>
+          <select id="f-spoof" onchange="onChange()">
+            <option value="stock">Stock (Kernarium)</option>
+            <option value="pixel9pro">Google Pixel 9 Pro</option>
+            <option value="s25ultra">Samsung Galaxy S25 Ultra</option>
+            <option value="rog9">ASUS ROG Phone 9 Pro (120 FPS)</option>
+            <option value="redmagic10">RedMagic 10 Pro (Gaming)</option>
+            <option value="xiaomi15u">Xiaomi 15 Ultra</option>
           </select>
         </div>
         <div class="row">
@@ -330,11 +347,12 @@ STUDIO_HTML = r"""<!DOCTYPE html>
       </div>
 
       <div class="card">
-        <h2>6. Build, Save &amp; Live Logs</h2>
+        <h2>6. Build, Save, Updates &amp; Live Logs</h2>
         <div class="actions">
           <button class="btn primary" id="btn-build" onclick="startBuild()">Build &amp; Verify IPA</button>
           <button class="btn" onclick="saveConfigFile()">Save Config</button>
           <button class="btn" onclick="downloadJson()">Export JSON</button>
+          <button class="btn" id="btn-upd" onclick="checkUpdates()">Check Updates</button>
         </div>
         <div class="cmd-box" id="cmd-preview"></div>
         <div class="status-banner" id="build-status" style="color:var(--muted);">Ready to build.</div>
@@ -373,13 +391,30 @@ async function init() {
 function renderPresets() {
   const g = document.getElementById("preset-grid");
   g.innerHTML = "";
-  Object.entries(META.presets).forEach(([id, p]) => {
+  const entries = [
+    ...Object.entries(META.presets || {}).map(([id, p]) => [id, p, false]),
+    ...Object.entries(META.custom_presets || {}).map(([id, p]) => [id, p, true]),
+  ];
+  entries.forEach(([id, p, isCustom]) => {
     const b = document.createElement("button");
     b.className = "preset-btn" + (CFG.preset === id ? " active" : "");
     b.onclick = () => applyPreset(id);
     b.innerHTML = `<div class="pt"></div><div class="pd"></div>`;
-    b.querySelector(".pt").textContent = p.name;
-    b.querySelector(".pd").textContent = p.tagline;
+    b.querySelector(".pt").textContent = p.name + (isCustom ? " ★" : "");
+    b.querySelector(".pd").textContent = p.tagline || "Custom preset (right-click to delete)";
+    if (isCustom) {
+      b.oncontextmenu = async (e) => {
+        e.preventDefault();
+        if (!confirm(`Delete custom preset "${id}"?`)) return;
+        await fetch("/api/presets/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Studio-Token": TOKEN },
+          body: JSON.stringify({ id }),
+        });
+        delete META.custom_presets[id];
+        renderPresets();
+      };
+    }
     g.appendChild(b);
   });
 }
@@ -424,15 +459,16 @@ function renderApps() {
 }
 
 function applyPreset(id) {
-  const p = META.presets[id];
+  const p = (META.presets && META.presets[id]) || (META.custom_presets && META.custom_presets[id]);
   if (!p) return;
   CFG = JSON.parse(JSON.stringify(p));
   CFG.preset = id;
-  CFG.build_unrooted = false;
-  CFG.shrink_apks = false;
+  CFG.build_unrooted = Boolean(p.build_unrooted);
+  CFG.shrink_apks = Boolean(p.shrink_apks);
   ICON_THEME = p.icon_theme || "duskjade";
 
-  document.getElementById("f-root-mode").value = p.root_enabled === false ? "hidden" : "on";
+  document.getElementById("f-root-mode").value = p.build_unrooted ? "unrooted" : (p.root_enabled === false ? "hidden" : "on");
+  document.getElementById("f-spoof").value = p.spoof_profile || "stock";
   document.getElementById("f-stealth").checked = Boolean(p.stealth);
   document.getElementById("f-selinux").value = p.selinux || "permissive";
   document.getElementById("f-adbroot").checked = p.adbroot !== false;
@@ -476,6 +512,7 @@ function collectConfig() {
     preset: CFG.preset || "mix",
     root_enabled: rmode === "on",
     build_unrooted: rmode === "unrooted",
+    spoof_profile: document.getElementById("f-spoof").value || "stock",
     stealth: document.getElementById("f-stealth").checked,
     selinux: document.getElementById("f-selinux").value,
     adbroot: document.getElementById("f-adbroot").checked,
@@ -551,6 +588,60 @@ function downloadJson() {
   a.click();
 }
 
+async function saveCustomPreset() {
+  const name = document.getElementById("cp-name").value.trim();
+  if (!name) return alert("Enter a name for your custom preset");
+  const id = name.toLowerCase().replace(/[^a-z0-9_-]/g, "-").slice(0, 24);
+  const preset = { ...collectConfig(), name, tagline: "Custom preset (right-click to delete)" };
+  const res = await fetch("/api/presets/save", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Studio-Token": TOKEN },
+    body: JSON.stringify({ id, preset }),
+  });
+  const d = await res.json();
+  if (!d.ok) return alert(d.error || "Save failed");
+  META.custom_presets = META.custom_presets || {};
+  META.custom_presets[id] = preset;
+  CFG.preset = id;
+  document.getElementById("cp-name").value = "";
+  renderPresets();
+}
+
+function importConfigPrompt() {
+  const raw = prompt("Paste exported andarium-config.json:");
+  if (!raw) return;
+  try {
+    const obj = JSON.parse(raw);
+    const cfg = obj.config || obj;
+    META.custom_presets = META.custom_presets || {};
+    META.custom_presets._imported = { name: "Imported", tagline: "Imported JSON", ...cfg };
+    applyPreset("_imported");
+  } catch (e) { alert("Invalid JSON: " + e.message); }
+}
+
+async function checkUpdates() {
+  const btn = document.getElementById("btn-upd");
+  btn.disabled = true;
+  document.getElementById("logbox").textContent = "Checking GitHub releases for all 21 tracked upstream artifacts...\n";
+  try {
+    const res = await fetch("/api/updates/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Studio-Token": TOKEN },
+      body: "{}",
+    });
+    const d = await res.json();
+    if (!d.ok) {
+      document.getElementById("logbox").textContent = "Update check failed: " + (d.error || "unknown");
+    } else {
+      const lines = ["ARTIFACT                     CURRENT                LATEST             STATUS", "-".repeat(86)];
+      for (const r of (d.rows || [])) {
+        lines.push(`${String(r.key).padEnd(28)} ${String(r.current_version).slice(0,21).padEnd(22)} ${String(r.latest_tag).slice(0,17).padEnd(18)} ${r.status}${r.error ? ': '+r.error : ''}`);
+      }
+      document.getElementById("logbox").textContent = lines.join("\n");
+    }
+  } finally { btn.disabled = false; }
+}
+
 async function startBuild() {
   const c = collectConfig();
   const outName = document.getElementById("f-outname").value.trim() || "Andarium-Root-1.0-15.ipa";
@@ -607,14 +698,27 @@ init();
 """
 
 
+def load_custom_presets() -> dict[str, object]:
+    if not CUSTOM_PRESETS_PATH.is_file():
+        return {}
+    try:
+        data = json.loads(CUSTOM_PRESETS_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
 def load_meta() -> dict[str, object]:
     presets_doc = json.loads((MANIFESTS_DIR / "presets.json").read_text(encoding="utf-8"))
     artifacts_doc = json.loads((MANIFESTS_DIR / "artifacts.json").read_text(encoding="utf-8"))
+    dev_profiles_doc = json.loads((MANIFESTS_DIR / "device_profiles.json").read_text(encoding="utf-8"))
     apk_sizes: dict[str, int] = {"magisk": int(artifacts_doc["magisk"]["size"])}
     for k, v in artifacts_doc["apks"].items():
         apk_sizes[k] = int(v["size"])
     return {
         "presets": presets_doc["presets"],
+        "custom_presets": load_custom_presets(),
+        "device_profiles": dev_profiles_doc.get("profiles", {}),
         "app_catalog": presets_doc["app_catalog"],
         "apk_sizes": apk_sizes,
         "base_ipa_size": int(artifacts_doc["base_ipa"]["size"]),
@@ -734,6 +838,40 @@ def make_handler(distro: str) -> type[http.server.BaseHTTPRequestHandler]:
                     return
                 DEFAULT_CONFIG_PATH.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
                 self._send_json(200, {"ok": True, "path": str(DEFAULT_CONFIG_PATH)})
+                return
+
+            if path == "/api/presets/save":
+                pid = str(payload.get("id", "")).strip()
+                pdata = payload.get("preset")
+                if not re.fullmatch(r"[a-z0-9_-]{1,24}", pid) or not isinstance(pdata, dict):
+                    self._send_json(400, {"ok": False, "error": "Invalid preset id or object"})
+                    return
+                all_p = load_custom_presets()
+                all_p[pid] = pdata
+                CUSTOM_PRESETS_PATH.write_text(json.dumps(all_p, indent=2) + "\n", encoding="utf-8")
+                self._send_json(200, {"ok": True, "id": pid})
+                return
+
+            if path == "/api/presets/delete":
+                pid = str(payload.get("id", "")).strip()
+                if not re.fullmatch(r"[a-z0-9_-]{1,24}", pid):
+                    self._send_json(400, {"ok": False, "error": "Invalid preset id"})
+                    return
+                all_p = load_custom_presets()
+                all_p.pop(pid, None)
+                CUSTOM_PRESETS_PATH.write_text(json.dumps(all_p, indent=2) + "\n", encoding="utf-8")
+                self._send_json(200, {"ok": True})
+                return
+
+            if path == "/api/updates/check":
+                try:
+                    sys.path.insert(0, str(ROOT_DIR / "scripts"))
+                    import update_artifacts  # type: ignore[import-not-found]
+                    manifest = json.loads((MANIFESTS_DIR / "artifacts.json").read_text(encoding="utf-8"))
+                    rows = update_artifacts.check_updates(manifest)
+                    self._send_json(200, {"ok": True, "rows": rows})
+                except Exception as exc:
+                    self._send_json(500, {"ok": False, "error": str(exc)})
                 return
 
             if path == "/api/build":

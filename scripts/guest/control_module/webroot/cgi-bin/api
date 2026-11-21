@@ -1,8 +1,12 @@
 #!/system/bin/sh
 # SPDX-License-Identifier: GPL-2.0-or-later
-# Token-authenticated, strictly allowlisted CGI API for Andarium Root Control Panel (v4).
+# Token-authenticated, strictly allowlisted CGI API for Andarium Root Control Panel (v5).
 
 CTL="/odm/andarium-root/scripts/andarium-ctl"
+WB="/odm/andarium-root/scripts/andarium-workbench"
+SPOOF="/odm/andarium-root/scripts/andarium-spoof"
+NET="/odm/andarium-root/scripts/andarium-net"
+AUTO="/odm/andarium-root/scripts/andarium-auto"
 TOKEN_FILE="/data/adb/andarium/run/webui.token"
 BB="/data/adb/magisk/busybox"
 [ -x "$BB" ] || BB="/odm/andarium-root/magisk-bin/busybox"
@@ -15,6 +19,16 @@ json_esc() {
     printf '%s' "$1" | "$BB" sed 's/\\/\\\\/g; s/"/\\"/g; s/\r//g' | "$BB" awk 'BEGIN{ORS="\\n"} {print}' | "$BB" sed 's/\\n$//'
 }
 
+send_cmd() {
+    rc="$1"
+    out="$2"
+    if [ "$rc" -eq 0 ]; then
+        send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+    else
+        send_json "400 Bad Request" "{\"ok\":false,\"error\":\"$(json_esc "$out")\"}"
+    fi
+}
+
 get_param() {
     key="$1"; old_ifs="$IFS"; IFS='&'
     for pair in $QUERY_STRING; do
@@ -22,6 +36,21 @@ get_param() {
         if [ "$k" = "$key" ]; then IFS="$old_ifs"; "$BB" httpd -d "$v"; return 0; fi
     done
     IFS="$old_ifs"; return 1
+}
+
+valid_pkg() {
+    case "$1" in
+        ''|*[!a-zA-Z0-9._]*|*..*) return 1 ;;
+        *.*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+valid_fname() {
+    case "$1" in
+        ''|.*|*/*|*..*|*[!a-zA-Z0-9._-]*) return 1 ;;
+        *) return 0 ;;
+    esac
 }
 
 TOKEN="$(get_param token || true)"
@@ -35,8 +64,13 @@ fi
 
 ACTION="$(get_param action || echo status)"
 VAL="$(get_param value || true)"
+P2="$(get_param p2 || true)"
+P3="$(get_param p3 || true)"
+P4="$(get_param p4 || true)"
+P5="$(get_param p5 || true)"
 
 case "$ACTION" in
+    # ── CORE STATUS, MODES & ROOT ──────────────────────────────────────────
     status) send_json "200 OK" "$("$CTL" status-json 2>&1)" ;;
     apps_list) send_json "200 OK" "$("$CTL" apps-json 2>&1)" ;;
     bundled_list) send_json "200 OK" "$("$CTL" bundled-json 2>&1)" ;;
@@ -63,10 +97,7 @@ case "$ACTION" in
     tweaks_swap)
         case "$VAL" in
             ''|*[!0-9]*) send_json "400 Bad Request" '{"ok":false,"error":"invalid swappiness"}' ;;
-            *)
-                out="$("$CTL" tweaks swappiness "$VAL" 2>&1)"
-                [ $? -eq 0 ] && send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}" || send_json "400 Bad Request" "{\"ok\":false,\"error\":\"$(json_esc "$out")\"}"
-                ;;
+            *) out="$("$CTL" tweaks swappiness "$VAL" 2>&1)"; send_cmd $? "$out" ;;
         esac
         ;;
     tweaks_awake)
@@ -111,10 +142,7 @@ case "$ACTION" in
         case "$VAL" in
             reset) send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$("$CTL" display density reset 2>&1)")\"}" ;;
             ''|*[!0-9]*) send_json "400 Bad Request" '{"ok":false,"error":"invalid density"}' ;;
-            *)
-                out="$("$CTL" display density "$VAL" 2>&1)"
-                [ $? -eq 0 ] && send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}" || send_json "400 Bad Request" "{\"ok\":false,\"error\":\"$(json_esc "$out")\"}"
-                ;;
+            *) out="$("$CTL" display density "$VAL" 2>&1)"; send_cmd $? "$out" ;;
         esac
         ;;
     display_size)
@@ -133,8 +161,7 @@ case "$ACTION" in
                 ;;
             *)
                 sub="enable"; [ "$ACTION" = "module_disable" ] && sub="disable"
-                out="$("$CTL" module "$sub" "$VAL" 2>&1)"
-                [ $? -eq 0 ] && send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}" || send_json "400 Bad Request" "{\"ok\":false,\"error\":\"$(json_esc "$out")\"}"
+                out="$("$CTL" module "$sub" "$VAL" 2>&1)"; send_cmd $? "$out"
                 ;;
         esac
         ;;
@@ -160,46 +187,193 @@ case "$ACTION" in
             *) send_json "400 Bad Request" '{"ok":false,"error":"invalid ssh action"}' ;;
         esac
         ;;
-    ssh_addkey)
-        out="$("$CTL" ssh addkey "$VAL" 2>&1)"
-        [ $? -eq 0 ] && send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}" || send_json "400 Bad Request" "{\"ok\":false,\"error\":\"$(json_esc "$out")\"}"
-        ;;
+    ssh_addkey) out="$("$CTL" ssh addkey "$VAL" 2>&1)"; send_cmd $? "$out" ;;
     ssh_delkey)
         case "$VAL" in
             ''|*[!0-9]*) send_json "400 Bad Request" '{"ok":false,"error":"invalid key index"}' ;;
-            *)
-                out="$("$CTL" ssh delkey "$VAL" 2>&1)"
-                [ $? -eq 0 ] && send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}" || send_json "400 Bad Request" "{\"ok\":false,\"error\":\"$(json_esc "$out")\"}"
-                ;;
+            *) out="$("$CTL" ssh delkey "$VAL" 2>&1)"; send_cmd $? "$out" ;;
         esac
         ;;
     certs_sync) send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$("$CTL" certs sync 2>&1)")\"}" ;;
     shizuku_start) send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$("$CTL" shizuku start 2>&1)")\"}" ;;
     pif_update) send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$("$CTL" pif-update 2>&1)")\"}" ;;
     grant|revoke|denylist_add|denylist_rm|bundled_uninstall)
-        case "$VAL" in
-            ''|*[!a-zA-Z0-9._]*) send_json "400 Bad Request" '{"ok":false,"error":"invalid package name"}' ;;
-            *)
-                case "$ACTION" in
-                    grant) out="$("$CTL" grant "$VAL" 2>&1)" ;;
-                    revoke) out="$("$CTL" revoke "$VAL" 2>&1)" ;;
-                    denylist_add) out="$("$CTL" denylist add "$VAL" 2>&1)" ;;
-                    denylist_rm) out="$("$CTL" denylist rm "$VAL" 2>&1)" ;;
-                    bundled_uninstall) out="$("$CTL" bundled-uninstall "$VAL" 2>&1)" ;;
-                esac
-                send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
-                ;;
-        esac
+        if ! valid_pkg "$VAL"; then
+            send_json "400 Bad Request" '{"ok":false,"error":"invalid package name"}'
+        else
+            case "$ACTION" in
+                grant) out="$("$CTL" grant "$VAL" 2>&1)" ;;
+                revoke) out="$("$CTL" revoke "$VAL" 2>&1)" ;;
+                denylist_add) out="$("$CTL" denylist add "$VAL" 2>&1)" ;;
+                denylist_rm) out="$("$CTL" denylist rm "$VAL" 2>&1)" ;;
+                bundled_uninstall) out="$("$CTL" bundled-uninstall "$VAL" 2>&1)" ;;
+            esac
+            send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}"
+        fi
         ;;
     bundled_install)
-        case "$VAL" in
-            ''|*/*|..*|*[!a-zA-Z0-9._-]*) send_json "400 Bad Request" '{"ok":false,"error":"invalid APK filename"}' ;;
-            *)
-                out="$("$CTL" bundled-install "$VAL" 2>&1)"
-                [ $? -eq 0 ] && send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$out")\"}" || send_json "400 Bad Request" "{\"ok\":false,\"error\":\"$(json_esc "$out")\"}"
-                ;;
-        esac
+        if ! valid_fname "$VAL"; then
+            send_json "400 Bad Request" '{"ok":false,"error":"invalid APK filename"}'
+        else
+            out="$("$CTL" bundled-install "$VAL" 2>&1)"; send_cmd $? "$out"
+        fi
         ;;
     reboot) send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$("$CTL" reboot 2>&1)")\"}" ;;
+
+    # ── v5 PILLAR 1: ON-DEVICE RE WORKBENCH ────────────────────────────────
+    wb_frida_scripts) send_json "200 OK" "$("$WB" frida-scripts 2>&1)" ;;
+    wb_frida_status)  send_json "200 OK" "$("$WB" frida-status 2>&1)" ;;
+    wb_frida_run)
+        case "$VAL" in
+            spawn|attach)
+                out="$("$WB" frida-run "$VAL" "$P2" "$P3" 2>&1)"; send_cmd $? "$out" ;;
+            *) send_json "400 Bad Request" '{"ok":false,"error":"mode must be spawn or attach"}' ;;
+        esac
+        ;;
+    wb_frida_stop)   out="$("$WB" frida-stop 2>&1)"; send_cmd $? "$out" ;;
+    wb_frida_log)    send_json "200 OK" "{\"ok\":true,\"output\":\"$(json_esc "$("$WB" frida-log "${VAL:-120}" 2>&1)")\"}" ;;
+    wb_frida_read)
+        if ! valid_fname "$VAL"; then send_json "400 Bad Request" '{"ok":false,"error":"invalid script name"}'
+        else out="$("$WB" frida-read "$VAL" 2>&1)"; send_cmd $? "$out"; fi
+        ;;
+    wb_frida_save)
+        if ! valid_fname "$VAL"; then send_json "400 Bad Request" '{"ok":false,"error":"invalid script name"}'
+        else out="$("$WB" frida-save "$VAL" 2>&1)"; send_cmd $? "$out"; fi
+        ;;
+    wb_frida_delete)
+        if ! valid_fname "$VAL"; then send_json "400 Bad Request" '{"ok":false,"error":"invalid script name"}'
+        else out="$("$WB" frida-delete "$VAL" 2>&1)"; send_cmd $? "$out"; fi
+        ;;
+    wb_pcap_status)  send_json "200 OK" "$("$WB" pcap-status 2>&1)" ;;
+    wb_pcap_list)    send_json "200 OK" "$("$WB" pcap-list 2>&1)" ;;
+    wb_pcap_start)   out="$("$WB" pcap-start "$VAL" 2>&1)"; send_cmd $? "$out" ;;
+    wb_pcap_stop)    out="$("$WB" pcap-stop 2>&1)"; send_cmd $? "$out" ;;
+    wb_pcap_delete)
+        if ! valid_fname "$VAL"; then send_json "400 Bad Request" '{"ok":false,"error":"invalid pcap name"}'
+        else out="$("$WB" pcap-delete "$VAL" 2>&1)"; send_cmd $? "$out"; fi
+        ;;
+    wb_pcap_download)
+        if ! valid_fname "$VAL"; then
+            send_json "400 Bad Request" '{"ok":false,"error":"invalid pcap name"}'
+        else
+            fpath="$("$WB" pcap-path "$VAL" 2>/dev/null || true)"
+            if [ -n "$fpath" ] && [ -f "$fpath" ]; then
+                printf 'Status: 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename="%s"\r\nCache-Control: no-store\r\n\r\n' "$VAL"
+                cat "$fpath"
+            else
+                send_json "404 Not Found" '{"ok":false,"error":"pcap file not found"}'
+            fi
+        fi
+        ;;
+    wb_logcat)
+        out="$("$WB" logcat "$VAL" "${P2:-I}" "${P3:-100}" 2>&1)"
+        send_cmd $? "$out"
+        ;;
+    wb_inspect_files)
+        if ! valid_pkg "$VAL"; then send_json "400 Bad Request" '{"ok":false,"error":"invalid package"}'
+        else send_json "200 OK" "$("$WB" inspect-files "$VAL" 2>&1)"; fi
+        ;;
+    wb_inspect_xml)
+        if ! valid_pkg "$VAL" || ! valid_fname "$P2"; then send_json "400 Bad Request" '{"ok":false,"error":"invalid package or xml file"}'
+        else out="$("$WB" inspect-xml "$VAL" "$P2" 2>&1)"; send_cmd $? "$out"; fi
+        ;;
+    wb_inspect_db_tables)
+        if ! valid_pkg "$VAL" || ! valid_fname "$P2"; then send_json "400 Bad Request" '{"ok":false,"error":"invalid package or db file"}'
+        else send_json "200 OK" "$("$WB" inspect-db-tables "$VAL" "$P2" 2>&1)"; fi
+        ;;
+    wb_inspect_db_query)
+        if ! valid_pkg "$VAL" || ! valid_fname "$P2"; then send_json "400 Bad Request" '{"ok":false,"error":"invalid package or db file"}'
+        else out="$("$WB" inspect-db-query "$VAL" "$P2" "$P3" "${P4:-50}" 2>&1)"; send_cmd $? "$out"; fi
+        ;;
+
+    # ── v5 PILLAR 2: DEVICE IDENTITY, FPS SPOOFER & TRICKYSTORE ────────────
+    spoof_status)    send_json "200 OK" "$("$SPOOF" status 2>&1)" ;;
+    spoof_profiles)  send_json "200 OK" "$("$SPOOF" profiles 2>&1)" ;;
+    spoof_set)
+        case "$VAL" in
+            stock|pixel9pro|s25ultra|rog9|redmagic10|xiaomi15u)
+                out="$("$SPOOF" set-profile "$VAL" 2>&1)"; send_cmd $? "$out" ;;
+            *) send_json "400 Bad Request" '{"ok":false,"error":"unknown spoof profile"}' ;;
+        esac
+        ;;
+    spoof_custom)    out="$("$SPOOF" set-custom "$VAL" "$P2" "$P3" "$P4" "$P5" 2>&1)"; send_cmd $? "$out" ;;
+    spoof_ssaid_list) send_json "200 OK" "$("$SPOOF" ssaid-list 2>&1)" ;;
+    spoof_ssaid_set)
+        if ! valid_pkg "$VAL"; then send_json "400 Bad Request" '{"ok":false,"error":"invalid package"}'
+        else out="$("$SPOOF" ssaid-set "$VAL" "${P2:-random}" 2>&1)"; send_cmd $? "$out"; fi
+        ;;
+    spoof_ts_list)    send_json "200 OK" "$("$SPOOF" ts-list 2>&1)" ;;
+    spoof_ts_add)
+        if ! valid_pkg "$VAL"; then send_json "400 Bad Request" '{"ok":false,"error":"invalid package"}'
+        else out="$("$SPOOF" ts-add "$VAL" "${P2:-auto}" 2>&1)"; send_cmd $? "$out"; fi
+        ;;
+    spoof_ts_remove)
+        if ! valid_pkg "$VAL"; then send_json "400 Bad Request" '{"ok":false,"error":"invalid package"}'
+        else out="$("$SPOOF" ts-remove "$VAL" 2>&1)"; send_cmd $? "$out"; fi
+        ;;
+    spoof_ts_sync)    out="$("$SPOOF" ts-sync-gms 2>&1)"; send_cmd $? "$out" ;;
+    spoof_ts_keybox)  out="$("$SPOOF" ts-keybox-import 2>&1)"; send_cmd $? "$out" ;;
+
+    # ── v5 PILLAR 3: FIREWALL, TRANSPARENT MITM & DNS/TUNNELS ──────────────
+    net_status)      send_json "200 OK" "$("$NET" status 2>&1)" ;;
+    net_fw_list)     send_json "200 OK" "$("$NET" fw-list 2>&1)" ;;
+    net_fw_block)
+        if ! valid_pkg "$VAL"; then send_json "400 Bad Request" '{"ok":false,"error":"invalid package"}'
+        else out="$("$NET" fw-block "$VAL" 2>&1)"; send_cmd $? "$out"; fi
+        ;;
+    net_fw_unblock)
+        if ! valid_pkg "$VAL"; then send_json "400 Bad Request" '{"ok":false,"error":"invalid package"}'
+        else out="$("$NET" fw-unblock "$VAL" 2>&1)"; send_cmd $? "$out"; fi
+        ;;
+    net_fw_flush)    out="$("$NET" fw-flush 2>&1)"; send_cmd $? "$out" ;;
+    net_tproxy_set)  out="$("$NET" tproxy-set "$VAL" "${P2:-all}" "${P3:-80,443}" 2>&1)"; send_cmd $? "$out" ;;
+    net_tproxy_clear) out="$("$NET" tproxy-clear 2>&1)"; send_cmd $? "$out" ;;
+    net_dns_set)     out="$("$NET" dns-set "$VAL" 2>&1)"; send_cmd $? "$out" ;;
+    net_wg_import)   out="$("$NET" wg-import 2>&1)"; send_cmd $? "$out" ;;
+    net_wg_up)       out="$("$NET" wg-up 2>&1)"; send_cmd $? "$out" ;;
+    net_wg_down)     out="$("$NET" wg-down 2>&1)"; send_cmd $? "$out" ;;
+    net_tunnel_start) out="$("$NET" tunnel-start "$VAL" "$P2" 2>&1)"; send_cmd $? "$out" ;;
+    net_tunnel_stop)  out="$("$NET" tunnel-stop 2>&1)"; send_cmd $? "$out" ;;
+
+    # ── v5 PILLAR 5: DEBLOATER, MACROS, SCRIPTS & SCHEDULER ────────────────
+    auto_debloat_list) send_json "200 OK" "$("$AUTO" debloat-list 2>&1)" ;;
+    auto_freeze)
+        if ! valid_pkg "$VAL"; then send_json "400 Bad Request" '{"ok":false,"error":"invalid package"}'
+        else out="$("$AUTO" freeze "$VAL" 2>&1)"; send_cmd $? "$out"; fi
+        ;;
+    auto_unfreeze)
+        if ! valid_pkg "$VAL"; then send_json "400 Bad Request" '{"ok":false,"error":"invalid package"}'
+        else out="$("$AUTO" unfreeze "$VAL" 2>&1)"; send_cmd $? "$out"; fi
+        ;;
+    auto_restore_all) out="$("$AUTO" restore-all 2>&1)"; send_cmd $? "$out" ;;
+    auto_macro)
+        case "$VAL" in
+            clean-caches|dump-env|restart-systemui|reset-network|export-apks|config-backup)
+                out="$("$AUTO" macro "$VAL" 2>&1)"; send_cmd $? "$out" ;;
+            *) send_json "400 Bad Request" '{"ok":false,"error":"unknown macro"}' ;;
+        esac
+        ;;
+    auto_scripts_list) send_json "200 OK" "$("$AUTO" scripts-list 2>&1)" ;;
+    auto_script_read)
+        if ! valid_fname "$VAL"; then send_json "400 Bad Request" '{"ok":false,"error":"invalid script name"}'
+        else out="$("$AUTO" script-read "$VAL" 2>&1)"; send_cmd $? "$out"; fi
+        ;;
+    auto_script_save)
+        if ! valid_fname "$VAL"; then send_json "400 Bad Request" '{"ok":false,"error":"invalid script name"}'
+        else out="$("$AUTO" script-save "$VAL" 2>&1)"; send_cmd $? "$out"; fi
+        ;;
+    auto_script_delete)
+        if ! valid_fname "$VAL"; then send_json "400 Bad Request" '{"ok":false,"error":"invalid script name"}'
+        else out="$("$AUTO" script-delete "$VAL" 2>&1)"; send_cmd $? "$out"; fi
+        ;;
+    auto_script_run)
+        if ! valid_fname "$VAL"; then send_json "400 Bad Request" '{"ok":false,"error":"invalid script name"}'
+        else out="$("$AUTO" script-run "$VAL" 2>&1)"; send_cmd $? "$out"; fi
+        ;;
+    auto_sched_list) send_json "200 OK" "$("$AUTO" sched-list 2>&1)" ;;
+    auto_sched_set)  out="$("$AUTO" sched-set "$VAL" "$P2" "$P3" 2>&1)"; send_cmd $? "$out" ;;
+    auto_sched_start) out="$("$AUTO" sched-start 2>&1)"; send_cmd $? "$out" ;;
+    auto_sched_stop)  out="$("$AUTO" sched-stop 2>&1)"; send_cmd $? "$out" ;;
+
     *) send_json "400 Bad Request" '{"ok":false,"error":"unknown action"}' ;;
 esac

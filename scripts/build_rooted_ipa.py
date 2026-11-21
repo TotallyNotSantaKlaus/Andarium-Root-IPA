@@ -652,6 +652,7 @@ def stage_tools(
     config_root: Path,
     *,
     frida_xz: Path | None,
+    frida_inject_xz: Path | None = None,
     dropbear_zip: Path | None,
     hosts_txt: Path | None,
     cli_tools: dict[str, Path] | None = None,
@@ -673,6 +674,15 @@ def stage_tools(
                 staged_js.append(js_file.name)
             if staged_js:
                 log(f"  staged Frida bypass script pack ({len(staged_js)}): {', '.join(staged_js)}")
+
+    if frida_inject_xz is not None:
+        finj_dst = tools_root / "frida-inject"
+        with lzma.open(frida_inject_xz, "rb") as xf:
+            raw = xf.read()
+        if len(raw) < 20 or raw[:4] != b"\x7fELF" or struct.unpack_from("<H", raw, 18)[0] != android_image.EM_AARCH64:
+            raise BuildError("Decompressed frida-inject is not an AArch64 ELF binary")
+        finj_dst.write_bytes(raw)
+        log(f"  staged tool: frida-inject ({len(raw):,} B standalone on-device AArch64 ELF)")
 
     if dropbear_zip is not None:
         db_dir = tools_root / "dropbear"
@@ -822,6 +832,17 @@ def stage_custom_dropins(custom_dir: Path, payload_custom_dir: Path) -> Path | N
             rp_dst.write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
             log(f"  staged custom/root-packages.txt ({len(lines)} package(s))")
 
+    # custom/keybox.xml (optional TrickyStore hardware attestation keybox)
+    kb_src = custom_dir / "keybox.xml"
+    if kb_src.is_file() and kb_src.stat().st_size > 0:
+        kb_data = read_text_lf(kb_src)
+        if b"<AndroidAttestation>" not in kb_data or b"<Keybox" not in kb_data:
+            raise BuildError("custom/keybox.xml is missing required <AndroidAttestation> or <Keybox> tags")
+        kb_dst = payload_custom_dir / "keybox.xml"
+        kb_dst.parent.mkdir(parents=True, exist_ok=True)
+        kb_dst.write_bytes(kb_data)
+        log(f"  staged custom/keybox.xml ({len(kb_data):,} B)")
+
     if any(counts.values()):
         log(
             f"  staged custom/ drop-ins: apks={counts['apks']}, modules={counts['modules']}, "
@@ -870,6 +891,7 @@ def build_odm_image(
     trickystore_zip: Path | None,
     zygisk_assistant_zip: Path | None,
     frida_xz: Path | None,
+    frida_inject_xz: Path | None = None,
     dropbear_zip: Path | None,
     hosts_txt: Path | None,
     cli_tools: dict[str, Path],
@@ -946,15 +968,20 @@ def build_odm_image(
                 (magisk_bin_dir / asset).write_bytes(zf.read(f"assets/{asset}"))
         log("  staged /odm/andarium-root/magisk-bin (Magisk v31.1 full environment)")
 
-        # 2. Seeded magisk.db
+        # 2. Seeded magisk.db & v5 device spoof/debloat catalog
         create_magisk_db(config_dir / "magisk.db", enable_rezygisk=(rezygisk_zip is not None))
         log(f"  staged /odm/andarium-root/config/magisk.db (zygisk={0 if rezygisk_zip else 1}, uid 2000 granted)")
+        dev_profiles_src = MANIFESTS_DIR / "device_profiles.json"
+        if dev_profiles_src.is_file():
+            (config_dir / "device-profiles.json").write_bytes(read_text_lf(dev_profiles_src))
+            log("  staged /odm/andarium-root/config/device-profiles.json (6 spoof profiles + safe debloat catalog)")
 
-        # 3. Stage tools (Frida Server + script pack, Dropbear SSH, CLI pentest suite, StevenBlack hosts) & custom/ drop-ins
+        # 3. Stage tools (Frida Server + Frida Inject + script pack, Dropbear SSH, CLI pentest suite, StevenBlack hosts) & custom/ drop-ins
         hosts_adblock_dst = stage_tools(
             tools_dir,
             config_dir,
             frida_xz=frida_xz,
+            frida_inject_xz=frida_inject_xz,
             dropbear_zip=dropbear_zip,
             hosts_txt=hosts_txt,
             cli_tools=cli_tools,
@@ -1000,17 +1027,18 @@ def build_odm_image(
         )
         check_shell_syntax(boot_sh)
 
-        ctl_sh = scripts_dir / "andarium-ctl"
-        ctl_sh.write_bytes(read_guest_script_lf("andarium-ctl"))
-        check_shell_syntax(ctl_sh)
-
-        termux_setup = scripts_dir / "andarium-termux-setup"
-        termux_setup.write_bytes(read_guest_script_lf("andarium-termux-setup"))
-        check_shell_syntax(termux_setup)
-
-        shell_rc = scripts_dir / "andarium-shell-rc.sh"
-        shell_rc.write_bytes(read_guest_script_lf("andarium-shell-rc.sh"))
-        check_shell_syntax(shell_rc)
+        for sname in (
+            "andarium-ctl",
+            "andarium-workbench",
+            "andarium-spoof",
+            "andarium-net",
+            "andarium-auto",
+            "andarium-termux-setup",
+            "andarium-shell-rc.sh",
+        ):
+            spath = scripts_dir / sname
+            spath.write_bytes(read_guest_script_lf(sname))
+            check_shell_syntax(spath)
 
     # 7. Apply exact ownership, permissions, and security.selinux labels to /odm/andarium-root
     apply_odm_tree_attrs(payload_root)
@@ -1133,10 +1161,13 @@ def encode_preboot_cmdline(
     awake_bit = "1" if twks.get("stay_awake", False) else "0"
     dpi_raw = str(twks.get("dpi", "default"))
     dpi = dpi_raw if re.fullmatch(r"[0-9]{3}", dpi_raw) else "0"
+    spoof = str(cfg.get("spoof_profile", "stock") or "stock")
+    if not re.fullmatch(r"[a-z0-9_-]{1,16}", spoof):
+        spoof = "stock"
 
     cfg_token = (
-        f"4,1,{preset},{root_bit},{se_bit},{stealth_bit},{adbroot_bit},{dbg_bit},"
-        f"{mods_bits},{svcs_bits},{apps_bits},{anim},{swap_int},{awake_bit},{dpi}"
+        f"5,1,{preset},{root_bit},{se_bit},{stealth_bit},{adbroot_bit},{dbg_bit},"
+        f"{mods_bits},{svcs_bits},{apps_bits},{anim},{swap_int},{awake_bit},{dpi},{spoof}"
     )
     if len(cfg_token) >= 91:
         raise BuildError(f"androidboot.ar.cfg exceeds Android PROP_VALUE_MAX: {cfg_token}")
@@ -1399,6 +1430,12 @@ def parse_args() -> argparse.Namespace:
         help="Custom iOS app icon theme (duskjade, crimson, cyber, stealth, or stock)",
     )
     parser.add_argument(
+        "--spoof",
+        choices=("stock", "pixel9pro", "s25ultra", "rog9", "redmagic10", "xiaomi15u"),
+        default=None,
+        help="Default early-boot device identity / 120 FPS gaming spoof profile",
+    )
+    parser.add_argument(
         "--no-root",
         action="store_true",
         help="True build-time unrooted IPA: keep stock init_boot.img untouched (no Magisk/su) while applying icons & APKs",
@@ -1474,7 +1511,7 @@ def resolve_profile(args: argparse.Namespace) -> argparse.Namespace:
     base["preset"] = preset_id
 
     # Merge declarative --config on top of preset
-    for key in ("root_enabled", "selinux", "stealth", "adbroot", "debuggable", "proxy", "icon_theme", "bundle_id", "display_name", "apps", "shrink_apks", "build_unrooted"):
+    for key in ("root_enabled", "selinux", "stealth", "adbroot", "debuggable", "proxy", "spoof_profile", "icon_theme", "bundle_id", "display_name", "apps", "shrink_apks", "build_unrooted"):
         if key in user_cfg and user_cfg[key] is not None:
             base[key] = user_cfg[key]
     for sub in ("modules", "services", "tweaks"):
@@ -1526,6 +1563,8 @@ def resolve_profile(args: argparse.Namespace) -> argparse.Namespace:
     # Apply explicit CLI overrides
     if args.selinux is not None:
         base["selinux"] = args.selinux
+    if getattr(args, "spoof", None) is not None:
+        base["spoof_profile"] = args.spoof
     if args.default_stealth is not None:
         base["stealth"] = args.default_stealth == "on"
     if args.no_adbroot:
@@ -1615,6 +1654,7 @@ def main() -> int:
     zygisk_assistant_zip = None if (args.no_root or args.no_stealth) else ensure_artifact(artifacts["modules"]["zygisk_assistant"], CACHE_DIR)
 
     frida_xz = None if (args.no_root or args.no_pentest) else ensure_artifact(artifacts["tools"]["frida_server"], CACHE_DIR)
+    frida_inject_xz = None if (args.no_root or args.no_pentest) else ensure_artifact(artifacts["tools"]["frida_inject"], CACHE_DIR)
     dropbear_zip = None if (args.no_root or args.no_network) else ensure_artifact(artifacts["tools"]["dropbear"], CACHE_DIR)
     hosts_txt = None if (args.no_root or args.no_network) else ensure_artifact(artifacts["tools"]["stevenblack_hosts"], CACHE_DIR)
 
@@ -1685,6 +1725,7 @@ def main() -> int:
             trickystore_zip=trickystore_zip,
             zygisk_assistant_zip=zygisk_assistant_zip,
             frida_xz=frida_xz,
+            frida_inject_xz=frida_inject_xz,
             dropbear_zip=dropbear_zip,
             hosts_txt=hosts_txt,
             cli_tools=cli_tools,
@@ -1714,10 +1755,12 @@ def main() -> int:
                 args.effective_config,
                 args.presets_doc["app_catalog"],
             )
+            dev_profiles = json.loads((MANIFESTS_DIR / "device_profiles.json").read_text(encoding="utf-8"))
             defaults_payload = {
-                "schema_version": 4,
+                "schema_version": 5,
                 "app_catalog": args.presets_doc["app_catalog"],
                 "presets": args.presets_doc["presets"],
+                "device_profiles": dev_profiles.get("profiles", {}),
                 "default_config": args.effective_config,
             }
             preboot_defaults_bytes = (json.dumps(defaults_payload, indent=2) + "\n").encode("utf-8")
