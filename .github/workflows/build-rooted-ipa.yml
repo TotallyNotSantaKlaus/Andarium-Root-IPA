@@ -208,7 +208,7 @@ jobs:
           PRESET="${{ github.event.inputs.preset || 'mix' }}"
           ICON_THEME="${{ github.event.inputs.icon_theme || 'duskjade' }}"
 
-          python3 scripts/build_rooted_ipa.py \
+          sudo env "PATH=$PATH" python3 scripts/build_rooted_ipa.py \
             --preset "${PRESET}" \
             --icon-theme "${ICON_THEME}" \
             --preboot-dylib "assets/ios/AndariumRootPreboot.dylib" \
@@ -218,7 +218,7 @@ jobs:
             --display-name "${DNAME}" \
             --selinux "${{ github.event.inputs.selinux || 'permissive' }}"
 
-          python3 scripts/build_rooted_ipa.py \
+          sudo env "PATH=$PATH" python3 scripts/build_rooted_ipa.py \
             --profile lite \
             --icon-theme "${ICON_THEME}" \
             --preboot-dylib "assets/ios/AndariumRootPreboot.dylib" \
@@ -226,6 +226,8 @@ jobs:
             --output "${LITE_PATH}" \
             --bundle-id "${BID}.lite" \
             --display-name "${DNAME} Lite"
+
+          sudo chown -R "$(id -u):$(id -g)" dist .cache
 
           ULT_SIZE=$(stat -c %s "${ULT_PATH}")
           ULT_SHA=$(sha256sum "${ULT_PATH}" | awk '{print $1}')
