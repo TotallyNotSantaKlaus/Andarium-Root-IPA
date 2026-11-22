@@ -201,8 +201,8 @@
       "battery_whitelist": false,
       "install_packages": true,
       "url": "https://auroraoss.com/downloads/AuroraStore/Release/AuroraStore-4.8.4.apk",
-      "sha256": "fd9c75d90d0f4a7c132b9b4a5a2cf1992a45e03b8d8ff988b7dcfbc0db2c4d11",
-      "size": 9360088
+      "sha256": "8a1ed9aa09631290da91cb793e0517b0f20dc70239ac94ae6682cd94f91a4bad",
+      "size": 9362660
     },
     "obtainium": {
       "name": "Obtainium-v1.7.4-arm64.apk",
