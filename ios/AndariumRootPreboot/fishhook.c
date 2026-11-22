@@ -66,18 +66,32 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
                                            section_t *section,
                                            intptr_t slide,
                                            nlist_t *symtab,
+                                           uint32_t nsyms,
                                            char *strtab,
                                            uint32_t *indirect_symtab) {
+    if (section->size == 0) {
+        return;
+    }
     uint32_t *indirect_symbol_indices = indirect_symtab + section->reserved1;
     void **indirect_symbol_bindings = (void **)((uintptr_t)slide + section->addr);
     vm_prot_t old_prot = get_protection(indirect_symbol_bindings);
     int is_const_data = ((old_prot & VM_PROT_WRITE) == 0);
     int made_writable = 0;
 
+    vm_size_t page = vm_page_size ? vm_page_size : 16384;
+    vm_address_t start_addr = (vm_address_t)indirect_symbol_bindings;
+    vm_address_t prot_start = start_addr & ~(page - 1);
+    vm_address_t prot_end = (start_addr + (vm_size_t)section->size + page - 1) & ~(page - 1);
+    vm_size_t prot_size = prot_end - prot_start;
+
     if (is_const_data) {
-        if (vm_protect(mach_task_self(), (vm_address_t)indirect_symbol_bindings,
-                       section->size, 0,
-                       VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) == KERN_SUCCESS) {
+        kern_return_t kr = vm_protect(mach_task_self(), prot_start, prot_size, 0,
+                                      VM_PROT_READ | VM_PROT_WRITE);
+        if (kr != KERN_SUCCESS) {
+            kr = vm_protect(mach_task_self(), prot_start, prot_size, 0,
+                            VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+        }
+        if (kr == KERN_SUCCESS) {
             made_writable = 1;
         } else {
             return;
@@ -88,7 +102,8 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
         uint32_t symtab_index = indirect_symbol_indices[i];
         if (symtab_index == INDIRECT_SYMBOL_ABS ||
             symtab_index == INDIRECT_SYMBOL_LOCAL ||
-            symtab_index == (INDIRECT_SYMBOL_LOCAL | INDIRECT_SYMBOL_ABS)) {
+            symtab_index == (INDIRECT_SYMBOL_LOCAL | INDIRECT_SYMBOL_ABS) ||
+            symtab_index >= nsyms) {
             continue;
         }
         uint32_t strtab_offset = symtab[symtab_index].n_un.n_strx;
@@ -114,8 +129,7 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
     }
 
     if (made_writable) {
-        vm_protect(mach_task_self(), (vm_address_t)indirect_symbol_bindings,
-                   section->size, 0, old_prot);
+        vm_protect(mach_task_self(), prot_start, prot_size, 0, old_prot);
     }
 }
 
@@ -123,12 +137,15 @@ static void rebind_symbols_for_image(struct rebindings_entry *rebindings,
                                      const struct mach_header *header,
                                      intptr_t slide) {
     Dl_info info;
-    if (dladdr(header, &info) == 0) {
+    if (dladdr(header, &info) == 0 || !info.dli_fname) {
+        return;
+    }
+    // Never rebind our own dylib (prevents self-recursion in hooked libc/Mach functions)
+    if (strstr(info.dli_fname, "AndariumRootPreboot") != NULL) {
         return;
     }
     // Only rebind app & embedded runtime frameworks (never system dylibs)
-    if (info.dli_fname &&
-        strstr(info.dli_fname, "Andarium.app") == NULL &&
+    if (strstr(info.dli_fname, "Andarium.app") == NULL &&
         strstr(info.dli_fname, "KRuntime_") == NULL) {
         return;
     }
@@ -166,14 +183,15 @@ static void rebind_symbols_for_image(struct rebindings_entry *rebindings,
         cur_seg_cmd = (segment_command_t *)cur;
         if (cur_seg_cmd->cmd == LC_SEGMENT_ARCH_DEPENDENT) {
             if (strcmp(cur_seg_cmd->segname, SEG_DATA) != 0 &&
-                strcmp(cur_seg_cmd->segname, "__DATA_CONST") != 0) {
+                strcmp(cur_seg_cmd->segname, "__DATA_CONST") != 0 &&
+                strcmp(cur_seg_cmd->segname, "__AUTH_CONST") != 0) {
                 continue;
             }
             for (uint32_t j = 0; j < cur_seg_cmd->nsects; j++) {
                 section_t *sect = (section_t *)(cur + sizeof(segment_command_t)) + j;
                 uint32_t stype = sect->flags & SECTION_TYPE;
                 if (stype == S_LAZY_SYMBOL_POINTERS || stype == S_NON_LAZY_SYMBOL_POINTERS) {
-                    perform_rebinding_with_section(rebindings, sect, slide, symtab, strtab, indirect_symtab);
+                    perform_rebinding_with_section(rebindings, sect, slide, symtab, symtab_cmd->nsyms, strtab, indirect_symtab);
                 }
             }
         }

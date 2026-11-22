@@ -227,6 +227,7 @@ def verify_ipa_bundle(
     expect_custom_icon: bool,
     expect_no_root: bool,
     expect_preboot_dylib: bool,
+    expect_raw_display_name: bool = False,
 ) -> tuple[dict[str, object], dict[str, object]]:
     with zipfile.ZipFile(ipa_path, "r") as zf:
         bad = zf.testzip()
@@ -255,6 +256,12 @@ def verify_ipa_bundle(
                 fail(f"Missing required iOS entitlement in Andarium Mach-O: {ent.decode()}")
         ok("embedded iOS Mach-O entitlements preserved (increased-memory-limit + extended-virtual-addressing)")
 
+        kruntime_path = IPA_APP_PREFIX + "Frameworks/KRuntime_Android_6_18_4K.framework/KRuntime_Android_6_18_4K"
+        kruntime_bin = zf.read(kruntime_path)
+        if b"\xa0\x01\x3e\xd4" not in kruntime_bin:
+            fail("KRuntime_Android_6_18_4K missing ARM64 brk #0xf00d (0xd43e01a0) StikDebug JIT trap instruction")
+        ok("KRuntime_Android_6_18_4K retains ARM64 brk #0xf00d StikDebug JIT breakpoint protocol")
+
         if expect_preboot_dylib:
             if IPA_PREBOOT_DYLIB not in names:
                 fail(f"Missing pre-boot dylib in IPA: {IPA_PREBOOT_DYLIB}")
@@ -272,10 +279,13 @@ def verify_ipa_bundle(
                 zname = IPA_PREBOOT_BUNDLE + req_res
                 if zname not in names:
                     fail(f"Missing pre-boot studio resource: {zname}")
+            preboot_html = zf.read(IPA_PREBOOT_BUNDLE + "preboot.html").decode("utf-8")
+            if "__andariumJitDiag" not in preboot_html or "launch_stikdebug" not in preboot_html:
+                fail("AndariumRootPreboot.bundle/preboot.html missing JIT Doctor / StikDebug launcher")
             defs = json.loads(zf.read(IPA_PREBOOT_BUNDLE + "defaults.json").decode("utf-8"))
             if not defs.get("presets") or not defs.get("app_catalog") or not defs.get("default_config"):
                 fail("AndariumRootPreboot.bundle/defaults.json missing required sections")
-            ok(f"AndariumRootPreboot.bundle verified ({len(defs['presets'])} presets, {len(defs['app_catalog'])} catalog apps)")
+            ok(f"AndariumRootPreboot.bundle verified ({len(defs['presets'])} presets, {len(defs['app_catalog'])} catalog apps, JIT Doctor)")
 
         stock_cmdline: bytes | None = None
         if base_ipa is not None:
@@ -299,10 +309,35 @@ def verify_ipa_bundle(
         pl = plistlib.loads(plist_raw)
         if pl.get("CFBundleIdentifier") != expected_bundle_id:
             fail(f"CFBundleIdentifier={pl.get('CFBundleIdentifier')!r}, expected {expected_bundle_id!r}")
-        if pl.get("CFBundleDisplayName") != expected_display_name:
-            fail(f"CFBundleDisplayName={pl.get('CFBundleDisplayName')!r}, expected {expected_display_name!r}")
+        expected_root_name = expected_display_name if expect_raw_display_name else "Andarium"
+        if pl.get("CFBundleDisplayName") != expected_root_name:
+            fail(
+                f"Root Info.plist CFBundleDisplayName={pl.get('CFBundleDisplayName')!r}, "
+                f"expected {expected_root_name!r} (required for StikDebug universal.js auto-assignment)"
+            )
         if pl.get("CFBundleExecutable") != "Andarium" or pl.get("CFBundleName") != "Andarium":
             fail("CFBundleExecutable / CFBundleName must remain 'Andarium'")
+        schemes = pl.get("LSApplicationQueriesSchemes") or []
+        if "stikdebug" not in schemes:
+            fail(f"Info.plist LSApplicationQueriesSchemes missing 'stikdebug': {schemes!r}")
+
+        lproj_files = sorted(
+            n for n in names
+            if n.startswith(IPA_APP_PREFIX) and n.endswith(".lproj/InfoPlist.strings") and n.count("/") == 3
+        )
+        if not lproj_files:
+            fail("Missing localized *.lproj/InfoPlist.strings in IPA")
+        for lf in lproj_files:
+            lraw = zf.read(lf)
+            if not lraw.startswith(b"bplist00"):
+                fail(f"{lf} is not in binary plist format")
+            lpl = plistlib.loads(lraw)
+            if lpl.get("CFBundleDisplayName") != expected_display_name:
+                fail(f"{lf} CFBundleDisplayName={lpl.get('CFBundleDisplayName')!r}, expected {expected_display_name!r}")
+        ok(
+            f"StikDebug JIT auto-script + localized display name verified "
+            f"(root={expected_root_name!r}, {len(lproj_files)} locales={expected_display_name!r}, stikdebug:// scheme allowed)"
+        )
 
         if expect_custom_icon:
             primary_iphone = pl.get("CFBundleIcons", {}).get("CFBundlePrimaryIcon", {})
@@ -735,6 +770,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--expected-apks", default=None, help="Optional comma-separated install_name list of staged APKs")
     parser.add_argument("--no-root", action="store_true", help="Verify build-time unrooted IPA (stock init_boot untouched)")
     parser.add_argument("--expect-preboot-dylib", action="store_true", help="Verify native iOS Pre-Boot dylib & LC_LOAD_DYLIB")
+    parser.add_argument("--raw-display-name", action="store_true", help="Expect raw root Info.plist CFBundleDisplayName override")
     parser.add_argument("--no-modules", action="store_true")
     parser.add_argument("--no-stealth", action="store_true")
     parser.add_argument("--no-pentest", action="store_true")
@@ -761,6 +797,7 @@ def main() -> int:
         expect_custom_icon=not args.no_custom_icon,
         expect_no_root=args.no_root,
         expect_preboot_dylib=args.expect_preboot_dylib,
+        expect_raw_display_name=args.raw_display_name,
     )
 
     work_dir = Path(tempfile.mkdtemp(prefix="andarium_root_verify_"))

@@ -1226,16 +1226,36 @@ def resolve_icon_dir(icon_theme: str) -> Path | None:
     raise BuildError(f"Unknown or missing icon theme directory: {themed}")
 
 
+STIKDEBUG_QUERY_SCHEMES = ("stikdebug", "sidestore", "altstore")
+
+
 def patch_info_plist(
     stock_plist_bytes: bytes,
     bundle_id: str,
     display_name: str,
     *,
     use_custom_icon: bool,
+    raw_display_name: bool = False,
 ) -> bytes:
     pl = plistlib.loads(stock_plist_bytes)
     pl["CFBundleIdentifier"] = bundle_id
-    pl["CFBundleDisplayName"] = display_name
+    # StikDebug AutoScriptAssignments matches `universal.js` strictly against the
+    # unlocalized root Info.plist CFBundleDisplayName/CFBundleName == "Andarium".
+    # Keep root Info.plist as "Andarium" by default so StikDebug auto-runs
+    # universal.js (`brk #0xf00d`), while *.lproj/InfoPlist.strings sets the
+    # visible SpringBoard label (`display_name`, e.g. "Andarium Root").
+    if raw_display_name:
+        pl["CFBundleDisplayName"] = display_name
+    else:
+        pl["CFBundleDisplayName"] = "Andarium"
+        pl["CFBundleName"] = "Andarium"
+
+    schemes = list(pl.get("LSApplicationQueriesSchemes") or [])
+    for sch in STIKDEBUG_QUERY_SCHEMES:
+        if sch not in schemes:
+            schemes.append(sch)
+    pl["LSApplicationQueriesSchemes"] = schemes
+
     if use_custom_icon:
         # Remove CFBundleIconName so iOS SpringBoard loads our custom PNG set directly
         # instead of DuskJade inside Assets.car (leaving Assets.car untouched for SwiftUI).
@@ -1256,6 +1276,12 @@ def patch_info_plist(
     return plistlib.dumps(pl, fmt=plistlib.FMT_BINARY)
 
 
+def patch_localized_info_plist_strings(stock_strings_bytes: bytes, display_name: str) -> bytes:
+    data = plistlib.loads(stock_strings_bytes)
+    data["CFBundleDisplayName"] = display_name
+    return plistlib.dumps(data, fmt=plistlib.FMT_BINARY)
+
+
 def package_ipa(
     base_ipa: Path,
     output_ipa: Path,
@@ -1269,6 +1295,7 @@ def package_ipa(
     icon_theme: str,
     preboot_defaults_bytes: bytes | None = None,
     preboot_dylib: Path | None = None,
+    raw_display_name: bool = False,
 ) -> None:
     output_ipa.parent.mkdir(parents=True, exist_ok=True)
     tmp_ipa = output_ipa.with_suffix(output_ipa.suffix + ".tmp")
@@ -1287,6 +1314,7 @@ def package_ipa(
 
     log(
         f"packaging {output_ipa} (bundle_id={bundle_id}, display_name={display_name!r}, "
+        f"stikdebug_root_name={'raw' if raw_display_name else 'Andarium'}, "
         f"icon_theme={icon_theme}, preboot_dylib={'yes' if preboot_dylib else 'no'})..."
     )
     t0 = time.monotonic()
@@ -1300,6 +1328,7 @@ def package_ipa(
             bundle_id,
             display_name,
             use_custom_icon=use_custom_icon,
+            raw_display_name=raw_display_name,
         )
 
         replacements: dict[str, bytes] = {
@@ -1307,6 +1336,22 @@ def package_ipa(
             IPA_LAYOUT_JSON: layout_json_bytes,
             IPA_MANIFEST_JSON: manifest_json_bytes,
         }
+        localized_count = 0
+        for src_name in src_zf.namelist():
+            if (
+                src_name.startswith(IPA_APP_PREFIX)
+                and src_name.endswith(".lproj/InfoPlist.strings")
+                and src_name.count("/") == 3
+            ):
+                replacements[src_name] = patch_localized_info_plist_strings(
+                    src_zf.read(src_name), display_name
+                )
+                localized_count += 1
+        if localized_count:
+            log(
+                f"  patched {localized_count} localized InfoPlist.strings -> {display_name!r} "
+                f"(root Info.plist stays {'raw' if raw_display_name else 'Andarium'} for StikDebug auto-script)"
+            )
         if cmdline_bytes is not None:
             replacements[IPA_CMDLINE_TXT] = cmdline_bytes
 
@@ -1454,7 +1499,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=None, help="Output IPA path (auto-named per preset/profile if omitted)")
     parser.add_argument("--base-ipa", type=Path, help="Optional local stock Andarium IPA override (for CI / newer releases)")
     parser.add_argument("--bundle-id", default=None, help="iOS CFBundleIdentifier")
-    parser.add_argument("--display-name", default=None, help="iOS CFBundleDisplayName")
+    parser.add_argument("--display-name", default=None, help="SpringBoard iOS display name (written to *.lproj/InfoPlist.strings)")
+    parser.add_argument(
+        "--raw-display-name",
+        action="store_true",
+        help="Also overwrite root Info.plist CFBundleDisplayName (WARNING: breaks StikDebug universal.js auto-assignment)",
+    )
     parser.add_argument("--release-suffix", default=None, help="Suffix appended to release_id")
     parser.add_argument(
         "--selinux",
@@ -1787,6 +1837,7 @@ def main() -> int:
             icon_theme=args.icon_theme,
             preboot_defaults_bytes=preboot_defaults_bytes,
             preboot_dylib=args.preboot_dylib,
+            raw_display_name=args.raw_display_name,
         )
 
         if not args.skip_verify:
@@ -1810,6 +1861,7 @@ def main() -> int:
             for flag_name, flag_val in (
                 ("--no-root", args.no_root),
                 ("--expect-preboot-dylib", args.preboot_dylib is not None),
+                ("--raw-display-name", args.raw_display_name),
                 ("--no-modules", args.no_modules),
                 ("--no-stealth", args.no_stealth),
                 ("--no-pentest", args.no_pentest),

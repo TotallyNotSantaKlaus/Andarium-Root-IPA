@@ -262,10 +262,10 @@ STUDIO_HTML = r"""<!DOCTYPE html>
       </div>
 
       <div class="card">
-        <h2>4. iOS App Icon Theme &amp; Identity</h2>
+        <h2>4. iOS App Icon Theme, Identity &amp; StikDebug JIT Hardening</h2>
         <div class="icon-grid" id="icon-grid"></div>
         <div class="row" style="margin-top:10px;">
-          <div><div class="rt">iOS App Display Name</div><div class="rd">Shown beneath the icon on iOS Home Screen</div></div>
+          <div><div class="rt">iOS App Display Name</div><div class="rd">Written to localized InfoPlist.strings (root Info.plist stays <code>Andarium</code> so StikDebug auto-runs <code>universal.js</code>)</div></div>
           <input type="text" id="f-dname" oninput="onChange()">
         </div>
         <div class="row">
@@ -275,6 +275,10 @@ STUDIO_HTML = r"""<!DOCTYPE html>
         <div class="row">
           <div><div class="rt">Output IPA Filename (inside dist/)</div><div class="rd">Must end in .ipa</div></div>
           <input type="text" id="f-outname" value="Andarium-Root-1.0-15.ipa" oninput="onChange()">
+        </div>
+        <div class="row">
+          <div><div class="rt">&#9889; Hardened StikDebug JIT Engine</div><div class="rd">Auto-script <code>universal.js</code> match · 36-bit &lt;64 GiB address shield · soft-<code>mlock</code> fallback · live JIT Doctor + <code>stikdebug://</code> deep-link</div></div>
+          <span class="pill-stat" style="padding:4px 10px;font-size:11.5px;">ALWAYS ON &#10003;</span>
         </div>
       </div>
     </div>

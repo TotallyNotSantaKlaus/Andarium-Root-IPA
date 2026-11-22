@@ -90,7 +90,7 @@ jobs:
             -fobjc-arc \
             -dynamiclib \
             -O2 \
-            -Wall -Wextra -Wno-unused-parameter \
+            -Wall -Wextra -Wno-unused-parameter -Werror=implicit-function-declaration -Werror=format \
             -install_name "@executable_path/Frameworks/AndariumRootPreboot.dylib" \
             -framework Foundation \
             -framework UIKit \
@@ -98,8 +98,10 @@ jobs:
             ios/AndariumRootPreboot/fishhook.c \
             ios/AndariumRootPreboot/AndariumRootPreboot.m \
             -o build-ios/AndariumRootPreboot.dylib
+          codesign --force --sign - build-ios/AndariumRootPreboot.dylib
           file build-ios/AndariumRootPreboot.dylib
           otool -L build-ios/AndariumRootPreboot.dylib
+          codesign -dvv build-ios/AndariumRootPreboot.dylib
       - name: Upload compiled AndariumRootPreboot.dylib
         uses: actions/upload-artifact@v4
         with:
@@ -247,10 +249,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.upstream.outputs.root_tag }}
-          name: "Andarium Root v4 (${{ steps.upstream.outputs.tag }})"
+          name: "Andarium Root v5.1 (${{ steps.upstream.outputs.tag }})"
           body: |
-            Automated rooted v4 builds based on upstream `imxieyi/Kernarium` release `${{ steps.upstream.outputs.tag }}`.
-            Includes the **Native iOS Pre-Boot Setup Studio (`# Root Setup`)** compiled with Apple's iPhoneOS SDK and injected cleanly into `Andarium.app`, plus Control Panel v4, 6 role presets, 13 bundled APKs, and Frida script pack.
+            Automated rooted v5.1 builds based on upstream `imxieyi/Kernarium` release `${{ steps.upstream.outputs.tag }}`.
+            Includes the **Hardened StikDebug JIT Engine** (StikDebug `universal.js` auto-script compatibility, 36-bit `<64 GiB` address shield, soft-`mlock` fallback, automatic `andarium.jit` arming, live JIT Doctor & 1-tap `stikdebug://enable-jit` deep-link), **Native iOS Pre-Boot Studio v2**, Control Panel v5, RE Workbench (`frida-inject`), Device Identity / 120 FPS Spoofer, Per-App Firewall & Transparent MITM Proxy, 6 role presets, and 13 bundled APKs.
             Both flavors passed full independent multi-layer verification (`verify_rooted_ipa.py`).
 
             - **Ultimate / Mix** (`${{ steps.build.outputs.ult_name }}`): `${{ steps.build.outputs.ult_size }}` bytes — SHA-256 `${{ steps.build.outputs.ult_sha }}`

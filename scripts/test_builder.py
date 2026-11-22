@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import plistlib
 import struct
 import subprocess
 import sys
@@ -104,10 +105,97 @@ def test_guest_shell_scripts() -> None:
         "KERNARIUM_DISPLAY_SCALE",
         "ANDARIUM_THERMAL_STATE",
         "ANDARIUM_HAPTICS",
+        "ANDARIUM_JIT",
+        "andarium.jit",
+        "andarium.statistics",
     ):
-        assert f'"{env_sym}"' in m_src, f"Missing verified env override in AndariumRootPreboot.m: {env_sym}"
+        assert f'"{env_sym}"' in m_src, f"Missing verified symbol in AndariumRootPreboot.m: {env_sym}"
+    assert '"andarium.stats"' not in m_src, "Stale key 'andarium.stats' must be 'andarium.statistics'"
 
     ok(f"all {len(guest_scripts)} guest scripts (sh -n), 5 Frida JS scripts & iOS Pre-Boot v2 sources valid")
+
+
+def test_jit_hardening() -> None:
+    # 1. Info.plist + localized InfoPlist.strings StikDebug auto-script compatibility
+    sample_plist = plistlib.dumps(
+        {
+            "CFBundleIdentifier": "com.imxieyi.andarium",
+            "CFBundleDisplayName": "Andarium",
+            "CFBundleName": "Andarium",
+            "CFBundleExecutable": "Andarium",
+        },
+        fmt=plistlib.FMT_BINARY,
+    )
+    patched_default = builder.patch_info_plist(
+        sample_plist, "com.andarium.root", "Andarium Root", use_custom_icon=True
+    )
+    pl_def = plistlib.loads(patched_default)
+    assert pl_def["CFBundleIdentifier"] == "com.andarium.root"
+    assert pl_def["CFBundleDisplayName"] == "Andarium", "Root Info.plist must stay 'Andarium' for StikDebug universal.js"
+    assert pl_def["CFBundleName"] == "Andarium"
+    for sch in ("stikdebug", "sidestore", "altstore"):
+        assert sch in pl_def.get("LSApplicationQueriesSchemes", []), f"Missing scheme {sch}"
+
+    patched_raw = builder.patch_info_plist(
+        sample_plist, "com.andarium.root", "Andarium Root", use_custom_icon=True, raw_display_name=True
+    )
+    assert plistlib.loads(patched_raw)["CFBundleDisplayName"] == "Andarium Root"
+
+    sample_strings = plistlib.dumps(
+        {"NSCameraUsageDescription": "Camera"}, fmt=plistlib.FMT_BINARY
+    )
+    patched_strings = builder.patch_localized_info_plist_strings(sample_strings, "Andarium Root")
+    assert patched_strings.startswith(b"bplist00")
+    lpl = plistlib.loads(patched_strings)
+    assert lpl["CFBundleDisplayName"] == "Andarium Root" and lpl["NSCameraUsageDescription"] == "Camera"
+
+    # 2. fishhook.c hardening (page-aligned vm_protect + self-exclusion + __AUTH_CONST)
+    fh_src = (ROOT / "ios/AndariumRootPreboot/fishhook.c").read_text(encoding="utf-8")
+    for token in ("AndariumRootPreboot", "vm_page_size", "prot_start", "__AUTH_CONST", "symtab_index >= nsyms"):
+        assert token in fh_src, f"fishhook.c missing JIT hardening token: {token}"
+
+    # 3. AndariumRootPreboot.m + preboot.html JIT engine & JIT Doctor
+    m_src = (ROOT / "ios/AndariumRootPreboot/AndariumRootPreboot.m").read_text(encoding="utf-8")
+    for token in (
+        "0x1000000000ULL",
+        "ar_hooked_vm_allocate",
+        "ar_hooked_mlock",
+        "ar_hooked_fprintf",
+        "ar_hooked_printf",
+        "MADV_WILLNEED",
+        "csops(",
+        "AR_CS_DEBUGGED",
+        "AR_CS_KILL",
+        "os_proc_available_memory",
+        "P_TRACED",
+        "stikdebug://enable-jit?bundle-id=",
+        "script-name=universal.js",
+    ):
+        assert token in m_src, f"AndariumRootPreboot.m missing JIT hardening token: {token}"
+
+    html_src = (ROOT / "ios/AndariumRootPreboot/preboot.html").read_text(encoding="utf-8")
+    for token in ("__andariumJitDiag", "launch_stikdebug", "hw-jit-mode", "hw-jit-shield", "hw-jit-mlock", "jit-trace"):
+        assert token in html_src, f"preboot.html missing JIT Doctor element: {token}"
+
+    # 4. Bundled official StikDebug universal.js reference script
+    ujs_path = ROOT / "docs/stikdebug-universal.js"
+    assert ujs_path.is_file() and ujs_path.stat().st_size > 4000, "Missing docs/stikdebug-universal.js"
+    ujs_txt = ujs_path.read_text(encoding="utf-8")
+    assert "0xf00d" in ujs_txt and "prepare_memory_region" in ujs_txt
+
+    # 5. If base IPA is cached, verify KRuntime brk #0xf00d + real InfoPlist.strings locales
+    base_ipa = ROOT / ".cache" / "Andarium-1.0-15.ipa"
+    if base_ipa.is_file():
+        with zipfile.ZipFile(base_ipa, "r") as zf:
+            kr = zf.read("Payload/Andarium.app/Frameworks/KRuntime_Android_6_18_4K.framework/KRuntime_Android_6_18_4K")
+            assert b"\xa0\x01\x3e\xd4" in kr, "KRuntime missing brk #0xf00d"
+            locales = [n for n in zf.namelist() if n.endswith(".lproj/InfoPlist.strings")]
+            assert len(locales) >= 4, f"Expected >=4 locales, got {locales}"
+            for loc in locales:
+                p_loc = builder.patch_localized_info_plist_strings(zf.read(loc), "Andarium Root")
+                assert plistlib.loads(p_loc)["CFBundleDisplayName"] == "Andarium Root"
+
+    ok("StikDebug JIT hardening verified (Info.plist auto-script, InfoPlist.strings, 36-bit shield, soft-mlock, fishhook, universal.js)")
 
 
 def test_presets_and_icons() -> None:
@@ -608,6 +696,7 @@ def test_altstore_source_generator() -> None:
 
 def main() -> int:
     test_guest_shell_scripts()
+    test_jit_hardening()
     test_presets_and_icons()
     test_profiles_and_presets()
     test_preboot_cmdline_encoding()
@@ -617,7 +706,7 @@ def main() -> int:
     test_studio_web_server()
     test_upstream_artifact_updater()
     test_altstore_source_generator()
-    print("[test] ALL V5 REGRESSION & SECURITY TESTS PASSED!", flush=True)
+    print("[test] ALL V5.1 REGRESSION, SECURITY & JIT HARDENING TESTS PASSED!", flush=True)
     return 0
 
 

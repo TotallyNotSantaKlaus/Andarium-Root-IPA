@@ -3,13 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Andarium Pre-Boot Studio v2</title>
+<title>Andarium Pre-Boot Studio v2 + JIT Doctor</title>
 <style>
   :root {
     --bg: #060b09; --card: #0e1815; --card2: #13221d; --border: #1e3830;
     --accent: #34f5a1; --accent-dim: rgba(52,245,161,0.14);
     --warn: #f5b942; --warn-dim: rgba(245,185,66,0.14);
-    --danger: #ff5c77; --text: #e8f5ef; --muted: #84a498;
+    --danger: #ff5c77; --danger-dim: rgba(255,92,119,0.15);
+    --text: #e8f5ef; --muted: #84a498;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body {
@@ -29,9 +30,25 @@
   h1 { margin: 0; font-size: 17px; }
   .sub { font-size: 11px; color: var(--muted); }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 13px 14px; margin-bottom: 12px; }
-  .card h2 { margin: 0 0 10px; font-size: 12px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.7px; }
+  .card.jit-card { border-color: rgba(52,245,161,0.45); background: linear-gradient(180deg, #10231b 0%, var(--card) 55%); }
+  .card h2 { margin: 0 0 10px; font-size: 12px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.7px; display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
   .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; border: 1px solid var(--accent); background: var(--accent-dim); color: var(--accent); }
   .badge.warn { border-color: var(--warn); background: var(--warn-dim); color: var(--warn); }
+  .badge.danger { border-color: var(--danger); background: var(--danger-dim); color: var(--danger); }
+  .diag-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; margin-bottom: 10px; }
+  .diag-box { background: #09120f; border: 1px solid var(--border); border-radius: 10px; padding: 8px 9px; }
+  .diag-k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
+  .diag-v { font-size: 12px; font-weight: 700; margin-top: 2px; word-break: break-word; }
+  .diag-v.ok { color: var(--accent); }
+  .diag-v.warn { color: var(--warn); }
+  .diag-v.err { color: var(--danger); }
+  .jit-hint { font-size: 11.5px; color: var(--text); background: #09130f; border: 1px solid var(--border); border-radius: 10px; padding: 9px 10px; margin-bottom: 10px; line-height: 1.4; }
+  .trace-box {
+    margin: 8px 0 0; padding: 8px 9px; border-radius: 9px;
+    background: #050a08; border: 1px solid var(--border); color: #9de8c5;
+    font-family: ui-monospace, Menlo, monospace; font-size: 10.5px;
+    max-height: 112px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  }
   .preset-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .preset-btn {
     text-align: left; padding: 10px 11px; border-radius: 12px; position: relative;
@@ -59,7 +76,7 @@
   .app-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; }
   .app-chip { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border); background: #0a1310; font-size: 12px; cursor: pointer; }
   .app-chip input { accent-color: var(--accent); width: 16px; height: 16px; }
-  .in-row { display: flex; gap: 6px; margin-top: 8px; }
+  .in-row { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   select, input[type="text"], textarea {
     background: #09120f; border: 1px solid var(--border); border-radius: 9px;
     color: var(--text); padding: 7px 10px; font-size: 12.5px; outline: none; font-family: inherit;
@@ -73,6 +90,7 @@
   }
   .btn { border: 1px solid var(--border); background: var(--card2); color: var(--text); padding: 10px 13px; border-radius: 11px; font-size: 13px; font-weight: 700; cursor: pointer; }
   .btn.primary { flex: 1; border-color: var(--accent); background: var(--accent); color: #04130c; }
+  .btn.sm { padding: 8px 11px; font-size: 12px; }
   .btn.danger { border-color: var(--danger); color: var(--danger); }
 </style>
 </head>
@@ -88,8 +106,56 @@
   <button class="btn" style="padding:7px 12px;font-size:12px;" onclick="closeSheet()">Close</button>
 </header>
 
+<div class="card jit-card">
+  <h2>
+    <span>0. &#9889; JIT Engine &amp; StikDebug Doctor</span>
+    <span class="badge warn" id="jit-status-badge">Checking...</span>
+  </h2>
+  <div class="jit-hint" id="jit-hint">Inspecting live iOS kernel CS_DEBUGGED / CS_KILL, StikDebug auto-script name, memory headroom, and 36-bit shield...</div>
+  <div class="diag-grid">
+    <div class="diag-box">
+      <div class="diag-k">StikDebug Auto-Script</div>
+      <div class="diag-v" id="jit-d-name">-</div>
+    </div>
+    <div class="diag-box">
+      <div class="diag-k">Kernel CS / Debugger</div>
+      <div class="diag-v" id="jit-d-cs">-</div>
+    </div>
+    <div class="diag-box">
+      <div class="diag-k">Memory Headroom</div>
+      <div class="diag-v" id="jit-d-mem">-</div>
+    </div>
+    <div class="diag-box">
+      <div class="diag-k">Device &amp; TXM / Shields</div>
+      <div class="diag-v" id="jit-d-dev">-</div>
+    </div>
+  </div>
+  <div class="in-row" style="margin-top:0;margin-bottom:8px;">
+    <button class="btn primary sm" onclick="launchStikDebug(false)">&#9889; Enable JIT via StikDebug (universal.js)</button>
+    <button class="btn sm" onclick="launchStikDebug(true)">Attach PID</button>
+    <button class="btn sm" onclick="refreshJitDiag()">Refresh</button>
+  </div>
+  <div class="row">
+    <div><div class="rt">JIT Launch Policy</div><div class="rd">Auto-Arms <code>andarium.jit</code> when opened from StikDebug &amp; keeps JIT active with VM overrides</div></div>
+    <select id="hw-jit-mode">
+      <option value="auto">Auto-Arm (Recommended)</option>
+      <option value="force_on">Always Force ON</option>
+      <option value="off">Force OFF (Gadgets)</option>
+    </select>
+  </div>
+  <div class="row">
+    <div><div class="rt">36-Bit Address Shield (&lt;64 GiB)</div><div class="rd">Prevents StikDebug 9-nibble truncation on extended-virtual-addressing</div></div>
+    <label class="switch"><input type="checkbox" id="hw-jit-shield" checked><span class="slider"></span></label>
+  </div>
+  <div class="row">
+    <div><div class="rt">Soft-mlock Fallback</div><div class="rd">Rescues <code>mlock()</code> ENOMEM/EPERM when free Apple ID signers strip increased-memory-limit</div></div>
+    <label class="switch"><input type="checkbox" id="hw-jit-mlock" checked><span class="slider"></span></label>
+  </div>
+  <pre class="trace-box" id="jit-trace">No JIT runtime log lines captured yet.</pre>
+</div>
+
 <div class="card">
-  <h2>1. Multi-VM Android Slots &amp; Hardware Tuning <span class="badge warn">Relaunch to apply</span></h2>
+  <h2><span>1. Multi-VM Android Slots &amp; Hardware Tuning</span> <span class="badge warn">Relaunch to apply</span></h2>
   <div class="rd" style="margin-bottom:8px;">Each slot gets its own isolated Android disk, apps &amp; root profile inside one IPA.</div>
   <div class="slot-row" id="slot-chips"></div>
   <div class="in-row">
@@ -134,7 +200,7 @@
     </select>
   </div>
   <div class="row">
-    <div><div class="rt">Anti-Thermal Throttle (`nominal`)</div><div class="rd">Prevents FPS drop when iPhone/iPad warms up</div></div>
+    <div><div class="rt">Anti-Thermal Throttle (<code>nominal</code>)</div><div class="rd">Prevents FPS drop when iPhone/iPad warms up</div></div>
     <label class="switch"><input type="checkbox" id="hw-thermal"><span class="slider"></span></label>
   </div>
   <div class="row">
@@ -148,7 +214,7 @@
 </div>
 
 <div class="card">
-  <h2>2. Role Presets &amp; Custom Presets <span class="badge">Instant on Start</span></h2>
+  <h2><span>2. Role Presets &amp; Custom Presets</span> <span class="badge">Instant on Start</span></h2>
   <div class="preset-grid" id="preset-grid"></div>
   <div class="in-row">
     <input type="text" id="cp-name" placeholder="Save current setup as preset (e.g. my-pentest)">
@@ -186,7 +252,7 @@
     <select id="f-selinux"><option value="permissive">Permissive</option><option value="enforcing">Enforcing</option></select>
   </div>
   <div class="row">
-    <div><div class="rt">Native ADB Root</div><div class="rd">Unlock `adb root` while keeping default shell mode</div></div>
+    <div><div class="rt">Native ADB Root</div><div class="rd">Unlock <code>adb root</code> while keeping default shell mode</div></div>
     <label class="switch"><input type="checkbox" id="f-adbroot"><span class="slider"></span></label>
   </div>
   <div class="row">
@@ -257,6 +323,65 @@ function post(msg) {
   }
 }
 
+window.__andariumJitDiag = function(d) {
+  if (!d) return;
+  const badge = document.getElementById('jit-status-badge');
+  const hint = document.getElementById('jit-hint');
+  badge.className = 'badge';
+  if (d.status_code === 'ready') {
+    badge.textContent = '\u26A1 JIT READY';
+    hint.textContent = 'StikDebug prepared JIT & cleared CS_KILL. Tap Start Emulation — Android will boot on the native ARM64 JIT engine.';
+  } else if (d.status_code === 'armed') {
+    badge.textContent = '\u26A1 DEBUGGER ARMED';
+    hint.textContent = 'Debugger detected (CS_DEBUGGED=1). Make sure the JIT switch on Home is ON and tap Start Emulation.';
+  } else if (d.status_code === 'failed') {
+    badge.className = 'badge danger';
+    badge.textContent = '\u2716 JIT FAILED';
+    hint.textContent = 'Kernarium logged a JIT failure below. Verify StikDebug 2.3+ is running universal.js (for TXM devices, enable TXM/universal script), then tap Enable JIT via StikDebug.';
+  } else if (d.status_code === 'disabled') {
+    badge.className = 'badge warn';
+    badge.textContent = 'JIT OFF';
+    hint.textContent = 'JIT Launch Policy is set to Force OFF (running on fallback Gadget engine). Switch to Auto-Arm to use StikDebug JIT.';
+  } else {
+    badge.className = 'badge warn';
+    badge.textContent = '\u26A0 NEEDS STIKDEBUG';
+    hint.textContent = 'No debugger attached yet (CS_DEBUGGED=0). Tap "Enable JIT via StikDebug (universal.js)" below — it passes bundle-id=' + (d.bundle_id || '') + ' directly with universal.js.';
+  }
+
+  const nameEl = document.getElementById('jit-d-name');
+  if (d.stikdebug_name_ok) {
+    nameEl.className = 'diag-v ok';
+    nameEl.textContent = 'Root "Andarium" \u2713 (UI: ' + (d.localized_display_name || 'Andarium') + ')';
+  } else {
+    nameEl.className = 'diag-v err';
+    nameEl.textContent = 'Mismatch "' + (d.root_display_name || '?') + '" (assign universal.js!)';
+  }
+
+  const csEl = document.getElementById('jit-d-cs');
+  if (d.cs_debugged && d.cs_kill_cleared) {
+    csEl.className = 'diag-v ok';
+    csEl.textContent = 'CS_DEBUGGED=1 · CS_KILL=0 (' + (d.cs_flags_hex || '') + ')';
+  } else {
+    csEl.className = 'diag-v warn';
+    csEl.textContent = 'CS_DEBUGGED=' + (d.cs_debugged ? '1' : '0') + ' · CS_KILL=' + (d.cs_kill_cleared ? '0' : '1') + ' (' + (d.cs_flags_hex || '') + ')';
+  }
+
+  const memEl = document.getElementById('jit-d-mem');
+  const lowHeadroom = (d.phys_mem_mb >= 5000 && d.avail_mem_mb > 0 && d.avail_mem_mb < 2200);
+  memEl.className = 'diag-v ' + (lowHeadroom ? 'warn' : 'ok');
+  memEl.textContent = d.avail_mem_mb + ' MiB free / ' + d.phys_mem_mb + ' MiB' + (lowHeadroom ? ' (free-cert limit?)' : ' \u2713');
+
+  const devEl = document.getElementById('jit-d-dev');
+  devEl.className = 'diag-v ' + (d.expects_txm ? 'warn' : 'ok');
+  devEl.textContent = (d.machine || '?') + ' · iOS ' + (d.ios_version || '?') +
+    (d.expects_txm ? ' [TXM]' : '') + ' · 36b:' + (d.relocations || 0) + ' mlk:' + (d.soft_mlocks || 0);
+
+  const traces = Array.isArray(d.trace_lines) ? d.trace_lines : [];
+  document.getElementById('jit-trace').textContent = traces.length
+    ? traces.join('\n')
+    : 'No JIT runtime warnings captured. PID=' + (d.pid || '?') + ' · Bundle=' + (d.bundle_id || '?') + ' · andarium.jit=' + (d.andarium_jit_pref ? '1' : '0');
+};
+
 window.__andariumInit = function(payload) {
   DEFAULTS = payload.defaults || { presets: {}, app_catalog: [] };
   CUSTOM_PRESETS = payload.custom_presets || {};
@@ -273,12 +398,16 @@ window.__andariumInit = function(payload) {
   cpuSel.innerHTML = opts;
   document.getElementById('cpu-hint').textContent = `Host exposes ${HOST_CPUS} cores · Auto uses optimal limit`;
 
+  if (payload.jit_diag) window.__andariumJitDiag(payload.jit_diag);
   renderSlots();
   applyHardware(hw);
   renderPresets();
   renderApps();
   applyConfig(payload.config || {});
 };
+
+function launchStikDebug(attach) { post({ type: 'launch_stikdebug', attach: !!attach }); }
+function refreshJitDiag() { post({ type: 'refresh_jit_diag' }); }
 
 function renderSlots() {
   document.getElementById('slot-chips').innerHTML = SLOTS.map(s =>
@@ -308,6 +437,9 @@ function applyHardware(hw) {
   document.getElementById('hw-thermal').checked = !!hw.thermal_nominal;
   document.getElementById('hw-stats').checked = !!hw.stats_hud;
   document.getElementById('hw-haptics').checked = !!hw.haptics_off;
+  document.getElementById('hw-jit-mode').value = hw.jit_mode || 'auto';
+  document.getElementById('hw-jit-shield').checked = hw.jit_36bit_shield !== false;
+  document.getElementById('hw-jit-mlock').checked = hw.jit_soft_mlock !== false;
 }
 
 function collectHardware() {
@@ -320,6 +452,9 @@ function collectHardware() {
     thermal_nominal: document.getElementById('hw-thermal').checked,
     stats_hud: document.getElementById('hw-stats').checked,
     haptics_off: document.getElementById('hw-haptics').checked,
+    jit_mode: document.getElementById('hw-jit-mode').value || 'auto',
+    jit_36bit_shield: document.getElementById('hw-jit-shield').checked,
+    jit_soft_mlock: document.getElementById('hw-jit-mlock').checked,
   };
 }
 
@@ -332,7 +467,7 @@ function renderPresets() {
   for (const [id, p, isCustom] of merged) {
     const btn = document.createElement('button');
     btn.className = 'preset-btn' + (ACTIVE_PRESET === id ? ' active' : '');
-    btn.innerHTML = `<div class="pt">${esc(p.name || id)}${isCustom ? ' ★' : ''}</div><div class="pd">${esc(p.tagline || 'Custom user preset')}</div>`;
+    btn.innerHTML = `<div class="pt">${esc(p.name || id)}${isCustom ? ' \u2605' : ''}</div><div class="pd">${esc(p.tagline || 'Custom user preset')}</div>`;
     btn.onclick = () => {
       ACTIVE_PRESET = id;
       applyConfig({ ...p, preset: id });

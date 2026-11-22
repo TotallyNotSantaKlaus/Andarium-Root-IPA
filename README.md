@@ -1,6 +1,38 @@
-# Andarium Root IPA Builder (v5 — Hypervisor, RE Workbench & Stealth Lab)
+# Andarium Root IPA Builder (v5.1 — Hardened JIT Engine, Hypervisor & RE Lab)
 
-Reproducible Windows + WSL2 & GitHub Actions patcher, interactive Web Builder Studio, **Native iOS Pre-Boot Studio v2 (Multi-VM Slots & Hardware Tuning)**, standalone on-device RE Workbench (`frida-inject`, PCAP recorder, SQLite/SharedPrefs inspector), Device Identity & 120 FPS Gaming Spoofer, Root Per-App Firewall & Transparent MITM Proxy, LineageOS Debloater & Task Scheduler, Upstream Auto-Updater, verifier, regression test suite, PC companion CLI, and live ADB auditor that transforms **`Andarium-1.0-15.ipa`** (Android 17 / LineageOS 24 on Linux 6.18.60 Darwin UML from [imxieyi/Kernarium](https://github.com/imxieyi/Kernarium)) into a fully customizable **`Andarium Root`** IPA — preserving StikDebug JIT, GPU acceleration, audio, camera, and all native iOS features.
+Reproducible Windows + WSL2 & GitHub Actions patcher, interactive Web Builder Studio, **Hardened StikDebug JIT Engine + Live JIT Doctor**, **Native iOS Pre-Boot Studio v2 (Multi-VM Slots & Hardware Tuning)**, standalone on-device RE Workbench (`frida-inject`, PCAP recorder, SQLite/SharedPrefs inspector), Device Identity & 120 FPS Gaming Spoofer, Root Per-App Firewall & Transparent MITM Proxy, LineageOS Debloater & Task Scheduler, Upstream Auto-Updater, verifier, regression test suite, PC companion CLI, and live ADB auditor that transforms **`Andarium-1.0-15.ipa`** (Android 17 / LineageOS 24 on Linux 6.18.60 Darwin UML from [imxieyi/Kernarium](https://github.com/imxieyi/Kernarium)) into a fully customizable **`Andarium Root`** IPA — preserving and hardening StikDebug JIT, GPU acceleration, audio, camera, and all native iOS features.
+
+---
+
+## ⚡ Hardened StikDebug JIT Engine (Why JIT Failed & All 6 Fixes)
+
+Every known iPhone JIT failure mode across SideStore, AltStore, Sideloadly, LiveContainer, free Apple IDs, and iOS 26 TXM devices is eliminated across 6 hardened layers:
+
+1. **StikDebug `universal.js` Auto-Script Compatibility *(Works in ALL Builds — Windows Local & CI)***:
+   - StikDebug's `AutoScriptAssignments` (`IdeviceFFIBridge.swift`) reads the **unlocalized root `Info.plist`** `CFBundleDisplayName` and ONLY auto-assigns `universal.js` (`brk #0xf00d`) if that value is **exact `"Andarium"`**.
+   - `build_rooted_ipa.py` keeps root `Info.plist` `CFBundleDisplayName = "Andarium"` & `CFBundleName = "Andarium"` while writing your custom label (e.g. `"Andarium Root"`) into all 4 localized `*.lproj/InfoPlist.strings` files so iOS SpringBoard still renders your custom name under the custom icon, AND StikDebug auto-selects `universal.js` 100% of the time.
+   - `LSApplicationQueriesSchemes` includes `stikdebug`, `sidestore`, and `altstore`. A verified local copy of StikDebug's official `universal.js` is also bundled in [`docs/stikdebug-universal.js`](docs/stikdebug-universal.js) for manual import if needed.
+2. **36-Bit (`< 64 GiB`) Address-Truncation Shield *(Native Pre-Boot Dylib)***:
+   - StikDebug's `JSDebugSupport.swift` encodes only 9 hex nibbles (36 bits = `0x0F_FFFF_FFFF` = 64 GiB) when blessing pages and discards `$E08` errors, whereas Kernarium allows JIT regions up to 40 bits (1 TiB) under `extended-virtual-addressing`.
+   - `AndariumRootPreboot.dylib` hooks `vm_allocate` in `KRuntime_Android_6_18_4K` and transparently relocates any 16 KiB-aligned `VM_FLAGS_ANYWHERE` region `>= 64 GiB` into a `< 64 GiB` `VM_FLAGS_FIXED` slot before StikDebug touches it.
+3. **Fresh-Install StikDebug Auto-Arming *(Native Pre-Boot Dylib)***:
+   - Stock Andarium defaults `andarium.jit = false` on fresh installs and immediately sends `brk #0xf00d` detach (`x16 = 0`) at launch before you even reach Home.
+   - Our pre-`main()` constructor probes `P_TRACED` via `sysctl(KERN_PROC_PID)` and automatically sets `andarium.jit = YES` when launched from StikDebug (`jit_mode = "auto"`).
+4. **`hasOtherSettings` Override Protection *(Native Pre-Boot Dylib)***:
+   - Kernarium disables JIT whenever any VM hardware/slot launch override (`ANDARIUM_GUEST_INSTANCE`, `KERNARIUM_VCPU_COUNT`, `KERNARIUM_GUEST_MEMORY_MIB`, etc.) is set without `ANDARIUM_JIT=1`.
+   - Our constructor always sets `ANDARIUM_JIT=1` whenever hardware/slot overrides are active and JIT is wanted.
+5. **Soft-`mlock()` Fallback + Page-Aligned `fishhook.c` *(Native Pre-Boot Dylib)***:
+   - When free Apple ID sideloaders strip `increased-memory-limit`, Kernarium's `mlock()` can fail with `ENOMEM`/`EPERM` even AFTER StikDebug successfully blessed the pages. Our `mlock` hook calls `madvise(MADV_WILLNEED)` and lets `Region::check()` prove real ARM64 code execution.
+   - `fishhook.c` page-aligns `vm_protect` across unaligned `__DATA_CONST,__got` sections and excludes `AndariumRootPreboot.dylib` itself against self-recursion.
+6. **Live On-Device JIT Doctor & 1-Tap `stikdebug://enable-jit` Launcher *(Native Pre-Boot Dylib)***:
+   - Captures `Kernarium: JIT memory: ...` and `Kernarium: running on gadgets...` lines live via `fprintf`/`printf` hooks, displays live `CS_DEBUGGED`, `CS_KILL`, `os_proc_available_memory()`, TXM status, shield/soft-mlock counters, and provides a 1-tap **`⚡ Enable JIT via StikDebug (universal.js)`** button right inside `# Setup`!
+
+### Quick iPhone JIT Setup Checklist
+1. Install the built IPA via **SideStore**, **AltStore**, **Feather**, or **Sideloadly** *(avoid signing methods that strip entitlements; if using **LiveContainer**, enable **Helper Process Support** in LiveContainer Settings and install inside a dedicated container)*.
+2. Install **StikDebug 2.3.x+** and complete local VPN / pairing file setup.
+3. Launch **Andarium Root** from inside **StikDebug** (or tap **`# Setup → ⚡ Enable JIT via StikDebug (universal.js)`** on CI builds with `AndariumRootPreboot.dylib`).
+4. Verify on the Andarium Home screen that the **JIT** toggle is **ON** and reads **`Ready. Applies to the next start.`** *(if launching the Windows-only build without the macOS dylib for the very first time: create the VM once, toggle **JIT ON** on Home, close Andarium in App Switcher, then reopen from **StikDebug**)*.
+5. **iPhone 15 Pro / 16 / 17 & M4 iPad (TXM on iOS 26+)**: make sure StikDebug is updated to the latest 2.3.x+ release and `universal.js` is assigned (if ever unassigned, import [`docs/stikdebug-universal.js`](docs/stikdebug-universal.js) in StikDebug → Scripts).
 
 ---
 
