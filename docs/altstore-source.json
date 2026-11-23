@@ -15,18 +15,18 @@
       "bundleIdentifier": "com.andarium.root",
       "developerName": "Andarium Root (based on imxieyi/Kernarium)",
       "subtitle": "Full-Root Android 17 VM on iOS (Magisk + Vector + Pentest & Stealth Suite)",
-      "localizedDescription": "Andarium Root v4 \u2014 Pre-Boot & Config Studio Edition (Android 17 / LineageOS 24 on Linux 6.18.60): Native iOS Pre-Boot Setup Studio (# Root Setup before Start Emulation), 6 Role Presets (Mix/Ultimate, Security Engineer, Hacker/RE, Gamer, Privacy/Daily, Clean/Unrooted), Magisk v31.1 with Root Hide/Restore toggle, ReZygisk, Vector (LSPosed), Control Panel v4 (Live Mode Switcher, Per-App SU & DenyList Manager, Bundled Offline App Storefront, Tweaks & JSON Backup), Stealth Stack (PlayIntegrityFork + TrickyStore + Zygisk-Assistant), Frida Server + 5 bypass scripts + strace/socat/sqlite3/jq/tcpdump, Android 17 Conscrypt CA cert injection, Dropbear SSH, Systemless Ad-Block, and 13 selectable apps (incl. Disable FLAG_SECURE & GPS Setter).\n\nSHA-256: 3fc1796e4cb4be7a5dd465f152446b775e2e55f002d2d00670adcad3a19eb933",
+      "localizedDescription": "Andarium Root v4 \u2014 Pre-Boot & Config Studio Edition (Android 17 / LineageOS 24 on Linux 6.18.60): Native iOS Pre-Boot Setup Studio (# Root Setup before Start Emulation), 6 Role Presets (Mix/Ultimate, Security Engineer, Hacker/RE, Gamer, Privacy/Daily, Clean/Unrooted), Magisk v31.1 with Root Hide/Restore toggle, ReZygisk, Vector (LSPosed), Control Panel v4 (Live Mode Switcher, Per-App SU & DenyList Manager, Bundled Offline App Storefront, Tweaks & JSON Backup), Stealth Stack (PlayIntegrityFork + TrickyStore + Zygisk-Assistant), Frida Server + 5 bypass scripts + strace/socat/sqlite3/jq/tcpdump, Android 17 Conscrypt CA cert injection, Dropbear SSH, Systemless Ad-Block, and 13 selectable apps (incl. Disable FLAG_SECURE & GPS Setter).\n\nSHA-256: aa3cd23ffa6b7d15bff101ba7ac48b553ffca49da853a127a3bb7e50e1f26675",
       "iconURL": "https://raw.githubusercontent.com/TotallyNotSantaKlaus/Andarium-Root-IPA/main/docs/icon.png",
       "tintColor": "#34F5A1",
       "category": "utilities",
       "versions": [
         {
-          "version": "1.0.15",
-          "buildVersion": "15",
-          "date": "2026-11-22T16:33:08Z",
-          "localizedDescription": "Andarium Root v4 \u2014 Pre-Boot & Config Studio Edition (Android 17 / LineageOS 24 on Linux 6.18.60): Native iOS Pre-Boot Setup Studio (# Root Setup before Start Emulation), 6 Role Presets (Mix/Ultimate, Security Engineer, Hacker/RE, Gamer, Privacy/Daily, Clean/Unrooted), Magisk v31.1 with Root Hide/Restore toggle, ReZygisk, Vector (LSPosed), Control Panel v4 (Live Mode Switcher, Per-App SU & DenyList Manager, Bundled Offline App Storefront, Tweaks & JSON Backup), Stealth Stack (PlayIntegrityFork + TrickyStore + Zygisk-Assistant), Frida Server + 5 bypass scripts + strace/socat/sqlite3/jq/tcpdump, Android 17 Conscrypt CA cert injection, Dropbear SSH, Systemless Ad-Block, and 13 selectable apps (incl. Disable FLAG_SECURE & GPS Setter).\n\nSHA-256: 3fc1796e4cb4be7a5dd465f152446b775e2e55f002d2d00670adcad3a19eb933",
-          "downloadURL": "https://github.com/TotallyNotSantaKlaus/Andarium-Root-IPA/releases/download/root-1.0b15-release/Andarium-Root-1.0-15.ipa",
-          "size": 1393552247,
+          "version": "1.1.16",
+          "buildVersion": "16",
+          "date": "2026-11-23T17:40:01Z",
+          "localizedDescription": "Andarium Root v4 \u2014 Pre-Boot & Config Studio Edition (Android 17 / LineageOS 24 on Linux 6.18.60): Native iOS Pre-Boot Setup Studio (# Root Setup before Start Emulation), 6 Role Presets (Mix/Ultimate, Security Engineer, Hacker/RE, Gamer, Privacy/Daily, Clean/Unrooted), Magisk v31.1 with Root Hide/Restore toggle, ReZygisk, Vector (LSPosed), Control Panel v4 (Live Mode Switcher, Per-App SU & DenyList Manager, Bundled Offline App Storefront, Tweaks & JSON Backup), Stealth Stack (PlayIntegrityFork + TrickyStore + Zygisk-Assistant), Frida Server + 5 bypass scripts + strace/socat/sqlite3/jq/tcpdump, Android 17 Conscrypt CA cert injection, Dropbear SSH, Systemless Ad-Block, and 13 selectable apps (incl. Disable FLAG_SECURE & GPS Setter).\n\nSHA-256: aa3cd23ffa6b7d15bff101ba7ac48b553ffca49da853a127a3bb7e50e1f26675",
+          "downloadURL": "https://github.com/TotallyNotSantaKlaus/Andarium-Root-IPA/releases/download/root-andarium-1.1/Andarium-Root-1.1-16.ipa",
+          "size": 1581047902,
           "minOSVersion": "17.0"
         }
       ],
@@ -48,18 +48,18 @@
       "bundleIdentifier": "com.andarium.root.lite",
       "developerName": "Andarium Root (based on imxieyi/Kernarium)",
       "subtitle": "Compact Rooted Android 17 VM on iOS (Magisk + Vector + microG)",
-      "localizedDescription": "Compact Andarium Root v4 Lite (Android 17 / LineageOS 24): Native iOS Pre-Boot Setup Studio, Magisk v31.1, ReZygisk, Vector (LSPosed), Control Panel v4, native adb root, switchable SELinux, Termux, Material Files, and microG.\n\nSHA-256: 58803e3ac82cef08486397abe4f71e18ea173ddec6e7b4569b1d8bf2e27b09e0",
+      "localizedDescription": "Compact Andarium Root v4 Lite (Android 17 / LineageOS 24): Native iOS Pre-Boot Setup Studio, Magisk v31.1, ReZygisk, Vector (LSPosed), Control Panel v4, native adb root, switchable SELinux, Termux, Material Files, and microG.\n\nSHA-256: 34643571314d0c860e752a1d3737d78b1498c1d0340c0ef0b52e23133ff7e333",
       "iconURL": "https://raw.githubusercontent.com/TotallyNotSantaKlaus/Andarium-Root-IPA/main/docs/icon.png",
       "tintColor": "#34F5A1",
       "category": "utilities",
       "versions": [
         {
-          "version": "1.0.15",
-          "buildVersion": "15",
-          "date": "2026-11-22T16:33:08Z",
-          "localizedDescription": "Compact Andarium Root v4 Lite (Android 17 / LineageOS 24): Native iOS Pre-Boot Setup Studio, Magisk v31.1, ReZygisk, Vector (LSPosed), Control Panel v4, native adb root, switchable SELinux, Termux, Material Files, and microG.\n\nSHA-256: 58803e3ac82cef08486397abe4f71e18ea173ddec6e7b4569b1d8bf2e27b09e0",
-          "downloadURL": "https://github.com/TotallyNotSantaKlaus/Andarium-Root-IPA/releases/download/root-1.0b15-release/Andarium-Root-Lite-1.0-15.ipa",
-          "size": 1255676792,
+          "version": "1.1.16",
+          "buildVersion": "16",
+          "date": "2026-11-23T17:40:01Z",
+          "localizedDescription": "Compact Andarium Root v4 Lite (Android 17 / LineageOS 24): Native iOS Pre-Boot Setup Studio, Magisk v31.1, ReZygisk, Vector (LSPosed), Control Panel v4, native adb root, switchable SELinux, Termux, Material Files, and microG.\n\nSHA-256: 34643571314d0c860e752a1d3737d78b1498c1d0340c0ef0b52e23133ff7e333",
+          "downloadURL": "https://github.com/TotallyNotSantaKlaus/Andarium-Root-IPA/releases/download/root-andarium-1.1/Andarium-Root-Lite-1.1-16.ipa",
+          "size": 1443172456,
           "minOSVersion": "17.0"
         }
       ],
